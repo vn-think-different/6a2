@@ -251,3 +251,49 @@ export interface ClassPoll {
   author: string;
   status: 'open' | 'closed';
 }
+
+export interface AISolutionStep {
+  stepNumber: number;
+  title: string;
+  explanation: string;
+  mathExpression?: string;
+  tip?: string;
+}
+
+export interface AISolutionDiagram {
+  type: 'none' | 'map' | 'venn' | 'geometry' | 'number_line' | 'bar_chart' | 'flowchart' | 'science' | 'english_flashcard' | 'mindmap';
+  title: string;
+  description: string;
+  chartData?: { label: string; value: number; color?: string; note?: string }[];
+  visualPoints?: string[];
+  imageUrl?: string;
+  badge?: string;
+}
+
+export interface AIFinalAnswer {
+  result: string;
+  conclusion: string;
+  verification?: string;
+  similarExercise?: string;
+}
+
+export interface AIExerciseSolution {
+  id?: string;
+  timestamp?: string;
+  problemSummary: string;
+  subject: string;
+  topic: string;
+  givenData: string[];
+  toFind: string;
+  keyConcepts: string[];
+  steps: AISolutionStep[];
+  visualDiagram?: AISolutionDiagram;
+  finalAnswer: AIFinalAnswer;
+  teacherEncouragement?: string;
+  userPrompt?: string;
+  userImage?: string;
+}
+
+export interface AISavedExercise extends AIExerciseSolution {
+  savedAt: string;
+}

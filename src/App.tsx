@@ -15,6 +15,7 @@ import { TeacherCornerView } from './views/TeacherCornerView';
 import { Students54View } from './views/Students54View';
 import { CultureAmbassadorView } from './views/CultureAmbassadorView';
 import { StudyCornerView } from './views/StudyCornerView';
+import { StudyWithAIView } from './views/StudyWithAIView';
 import { ParentCompanionView } from './views/ParentCompanionView';
 import { DiaryAndVlogView } from './views/DiaryAndVlogView';
 import { ClassProgressView } from './views/ClassProgressView';
@@ -532,6 +533,10 @@ export default function App() {
             onAddScheduleEvent={handleAddScheduleEvent}
             onDeleteScheduleEvent={handleDeleteScheduleEvent}
           />
+        )}
+
+        {activeTab === 'hoc_cung_ai' && (
+          <StudyWithAIView currentUser={currentUser} />
         )}
 
         {activeTab === 'quan_tri' && (

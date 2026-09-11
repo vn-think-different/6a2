@@ -18,6 +18,7 @@ import { StudyCornerView } from './views/StudyCornerView';
 import { ParentCompanionView } from './views/ParentCompanionView';
 import { DiaryAndVlogView } from './views/DiaryAndVlogView';
 import { ClassProgressView } from './views/ClassProgressView';
+import { AdminManagementView } from './views/AdminManagementView';
 
 // Types & Mock Data & DB
 import {
@@ -30,6 +31,8 @@ import {
   Student,
   Reaction,
   Comment,
+  StudyDocument,
+  ScheduleEvent,
 } from './types';
 import {
   INITIAL_USERS,
@@ -60,6 +63,16 @@ import {
   getStoredPosts,
   saveStoredPosts,
 } from './db/authDatabase';
+import {
+  getStoredStudyDocuments,
+  addStudyDocument,
+  updateStudyDocument,
+  deleteStudyDocument,
+  toggleStudyDocumentLike,
+  getStoredScheduleEvents,
+  addScheduleEvent,
+  deleteScheduleEvent,
+} from './db/studyCornerDatabase';
 
 export default function App() {
   // Check if session exists in DB, otherwise null -> show WelcomeLoginView
@@ -83,10 +96,42 @@ export default function App() {
   const [cultureMailbox, setCultureMailbox] = useState<CultureMailboxItem[]>(CULTURE_MAILBOX_ITEMS);
   const [parentSuggestions, setParentSuggestions] = useState<ParentSuggestion[]>(INITIAL_PARENT_SUGGESTIONS);
   const [actionProofs, setActionProofs] = useState(PARENT_ACTION_PROOFS);
+  const [studyDocuments, setStudyDocuments] = useState<StudyDocument[]>(() => getStoredStudyDocuments());
+  const [scheduleEvents, setScheduleEvents] = useState<ScheduleEvent[]>(() => getStoredScheduleEvents());
 
   // Count pending posts for moderation badge
   const pendingPosts = posts.filter((p) => p.status === 'pending');
   const pendingCount = pendingPosts.length;
+
+  const handleAddStudyDocument = (doc: StudyDocument) => {
+    const updated = addStudyDocument(doc);
+    setStudyDocuments(updated);
+  };
+
+  const handleUpdateStudyDocument = (doc: StudyDocument) => {
+    const updated = updateStudyDocument(doc);
+    setStudyDocuments(updated);
+  };
+
+  const handleDeleteStudyDocument = (id: string) => {
+    const updated = deleteStudyDocument(id);
+    setStudyDocuments(updated);
+  };
+
+  const handleToggleLikeStudyDocument = (id: string) => {
+    const updated = toggleStudyDocumentLike(id);
+    setStudyDocuments(updated);
+  };
+
+  const handleAddScheduleEvent = (evt: ScheduleEvent) => {
+    const updated = addScheduleEvent(evt);
+    setScheduleEvents(updated);
+  };
+
+  const handleDeleteScheduleEvent = (id: string) => {
+    const updated = deleteScheduleEvent(id);
+    setScheduleEvents(updated);
+  };
 
   const handleUpdateStudentAvatar = (stt: number, newAvatar: string) => {
     setStudents((prev) =>
@@ -458,7 +503,7 @@ export default function App() {
             students={students}
             currentUser={currentUser}
             onOpenProfile={() => setIsProfileModalOpen(true)}
-            onAdminManage={() => setIsAdminAccountsModalOpen(true)}
+            onAdminManage={() => setActiveTab('quan_tri')}
             onUpdateStudentAvatar={handleUpdateStudentAvatar}
           />
         )}
@@ -476,10 +521,36 @@ export default function App() {
 
         {activeTab === 'goc_hoc_tap' && (
           <StudyCornerView
-            documents={STUDY_DOCUMENTS}
-            scheduleEvents={SCHEDULE_EVENTS}
+            documents={studyDocuments}
+            scheduleEvents={scheduleEvents}
             products={STUDENT_PRODUCTS}
             currentUser={currentUser}
+            onAddDocument={handleAddStudyDocument}
+            onUpdateDocument={handleUpdateStudyDocument}
+            onDeleteDocument={handleDeleteStudyDocument}
+            onToggleLikeDocument={handleToggleLikeStudyDocument}
+            onAddScheduleEvent={handleAddScheduleEvent}
+            onDeleteScheduleEvent={handleDeleteScheduleEvent}
+          />
+        )}
+
+        {activeTab === 'quan_tri' && (
+          <AdminManagementView
+            currentUser={currentUser}
+            posts={posts}
+            onApprovePost={handleApprovePost}
+            onRejectPost={handleRejectPost}
+            onDeletePost={handleDeletePost}
+            onClassUpdated={() => {
+              setStudents(getStoredStudents());
+              const updatedUsers = getStoredUsers();
+              const currentId = currentUser.id;
+              const refreshedSelf = updatedUsers.find((u) => u.id === currentId);
+              if (refreshedSelf) {
+                setCurrentUser(refreshedSelf);
+                saveCurrentSession(refreshedSelf);
+              }
+            }}
           />
         )}
 

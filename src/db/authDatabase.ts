@@ -480,6 +480,45 @@ export function adminRemoveMember(
 }
 
 /**
+ * Admin updates / assigns member role & title
+ */
+export function adminUpdateMemberRole(
+  userId: string,
+  newRole: UserRole,
+  newRoleTitle: string,
+  ambassadorRole?: string
+): { success: boolean; message: string } {
+  const users = getStoredUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index === -1) {
+    return { success: false, message: 'Không tìm thấy tài khoản thành viên.' };
+  }
+
+  const target = users[index];
+  target.role = newRole;
+  target.roleTitle = newRoleTitle;
+  saveStoredUsers(users);
+
+  // If this member is a student, also synchronize with students list
+  if (target.studentId) {
+    const students = getStoredStudents();
+    const stIndex = students.findIndex((s) => s.stt === target.studentId);
+    if (stIndex !== -1) {
+      students[stIndex].roleInClass = newRoleTitle;
+      if (ambassadorRole !== undefined) {
+        students[stIndex].ambassadorRole = ambassadorRole;
+      }
+      saveStoredStudents(students);
+    }
+  }
+
+  return {
+    success: true,
+    message: `Đã cập nhật vai trò của "${target.name}" thành "${newRoleTitle}" thành công!`,
+  };
+}
+
+/**
  * Get all posts from persistent CSDL
  */
 export function getStoredPosts(): Post[] {

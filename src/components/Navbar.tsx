@@ -82,6 +82,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'dong_hanh_phu_huynh', label: 'Đồng hành PH', icon: UserCheck, badge: 0 },
     { id: 'nhat_ky_vlog', label: 'Nhật ký & Vlog', icon: Camera, badge: 0 },
     { id: 'cung_tien_bo', label: 'Cùng tiến bộ', icon: BarChart3, badge: 0 },
+    ...(currentUser.role === 'admin' || currentUser.role === 'sub_admin'
+      ? [{ id: 'quan_tri', label: 'Quản trị lớp', icon: ShieldCheck, badge: effectivePendingCount }]
+      : []),
   ];
 
   return (
@@ -306,18 +309,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     </button>
 
-                    {(currentUser.role === 'admin' || currentUser.role === 'sub_admin') && openAdminAccountsModal && (
+                    {(currentUser.role === 'admin' || currentUser.role === 'sub_admin') && (
                       <button
                         onClick={() => {
                           setShowUserMenu(false);
-                          openAdminAccountsModal();
+                          handleTabChange('quan_tri');
                         }}
                         className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition cursor-pointer"
                       >
                         <ShieldCheck className="w-4 h-4 text-amber-600" />
                         <div className="flex-1">
-                          <p className="leading-tight">Quản trị tài khoản & Sĩ số lớp</p>
-                          <p className="text-[10px] text-amber-700 font-normal">Đổi mật khẩu thành viên, thêm/bớt học sinh</p>
+                          <p className="leading-tight">Trung tâm Quản trị & Phân quyền</p>
+                          <p className="text-[10px] text-amber-700 font-normal">Giao diện Tab quản trị: Gán vai trò, duyệt bài, đổi mật khẩu</p>
                         </div>
                       </button>
                     )}

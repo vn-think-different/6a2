@@ -172,12 +172,20 @@ export interface StudyDocument {
   id: string;
   subject: string;
   title: string;
-  type: 'pdf' | 'doc' | 'slide' | 'quiz';
+  type: 'pdf' | 'doc' | 'slide' | 'quiz' | 'image' | 'lesson';
   description: string;
+  content?: string;
   author: string;
+  authorRole?: string;
   date: string;
   downloadUrl?: string;
+  attachmentName?: string;
+  attachmentDataUrl?: string;
+  attachmentSize?: string;
+  images?: string[];
   size: string;
+  pinned?: boolean;
+  likes?: number;
 }
 
 export interface ScheduleEvent {

@@ -1,0 +1,6 @@
+{
+  "name": "6A2 – Kết Nối Yêu Thương",
+  "description": "Mạng xã hội và cổng thông tin lớp 6A2 Trường THCS Bình An kết nối cô giáo chủ nhiệm Nguyễn Thị Tuyết Nhi, 54 học sinh và phụ huynh",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

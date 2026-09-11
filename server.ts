@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 
 const app = express();
@@ -595,7 +594,7 @@ function getSmartFallbackSolution(prompt: string, subject?: string) {
 }
 
 // API endpoint: Solve Exercise with Gemini AI
-app.post('/api/ai/solve-exercise', async (req, res) => {
+app.post(['/api/ai/solve-exercise', '/ai/solve-exercise', '/solve-exercise'], async (req, res) => {
   try {
     const { prompt, image, mimeType, subject } = req.body;
 
@@ -745,7 +744,7 @@ BẮT BUỘC TRẢ VỀ ĐỊNH DẠNG JSON HỢP LỆ (KHÔNG VIẾT MARKDOWN \
 });
 
 // API endpoint: Ask AI about a specific step (interactive follow-up)
-app.post('/api/ai/ask-step', async (req, res) => {
+app.post(['/api/ai/ask-step', '/ai/ask-step', '/ask-step'], async (req, res) => {
   try {
     const { question, stepTitle, stepExplanation, problemSummary } = req.body;
     const ai = getAI();
@@ -783,7 +782,7 @@ Hãy trả lời học sinh bằng giọng điệu cô giáo/thầy giáo ân c�
 });
 
 // API Health Check
-app.get('/api/health', (req, res) => {
+app.get(['/api/health', '/health'], (req, res) => {
   res.json({
     status: 'ok',
     geminiConfigured: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY',
@@ -794,6 +793,7 @@ app.get('/api/health', (req, res) => {
 // Vite Middleware for development & Static Serving for production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

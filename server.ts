@@ -812,4 +812,9 @@ async function startServer() {
   });
 }
 
-startServer();
+// Start standalone server when running in local dev or Cloud Run container (not Vercel serverless)
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;

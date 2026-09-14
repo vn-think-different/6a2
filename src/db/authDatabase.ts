@@ -1,9 +1,14 @@
 import { UserAccount, Student, UserRole, Post } from '../types';
 import { STUDENTS_54, CLASS_INFO, INITIAL_POSTS } from '../data/mockData';
+import {
+  saveUserToCloud,
+  deleteUserFromCloud,
+  fetchUserFromCloud,
+  queryUserByUsernameFromCloud,
+  StoredUser,
+} from './firestoreService';
 
-export interface StoredUser extends UserAccount {
-  password: string; // Plaintext or hashed for client-side local DB
-}
+export type { StoredUser };
 
 const STORAGE_USERS_KEY = 'lop6a2_auth_users_db_v1';
 const STORAGE_SESSION_KEY = 'lop6a2_current_session_user_v1';
@@ -35,7 +40,7 @@ export function toSlugUsername(str: string): string {
 /**
  * Bootstrap default database from 54 students and teacher/parents
  */
-function createInitialUsers(): StoredUser[] {
+export function createInitialUsers(): StoredUser[] {
   const users: StoredUser[] = [];
 
   // 1. Homeroom Teacher (Main Admin)
@@ -141,7 +146,7 @@ export function getStoredUsers(): StoredUser[] {
 }
 
 /**
- * Save users list into persistent CSDL
+ * Save users list into persistent local cache
  */
 export function saveStoredUsers(users: StoredUser[]): void {
   try {
@@ -182,8 +187,7 @@ export function saveStoredStudents(students: Student[]): void {
 }
 
 /**
- * Authenticate by username and password.
- * Matches lowercase, trimmed username or aliases.
+ * Authenticate by username and password (synchronous from cache).
  */
 export function authenticateUser(
   usernameInput: string,
@@ -195,7 +199,6 @@ export function authenticateUser(
   const found = users.find((u) => {
     const userSlug = toSlugUsername(u.username);
     const nameSlug = toSlugUsername(u.name);
-    // Allow matching by username, exact name slug, or alias 'admin' for teacher
     return (
       userSlug === cleanedUsername ||
       nameSlug === cleanedUsername ||
@@ -221,6 +224,52 @@ export function authenticateUser(
 }
 
 /**
+ * Cross-device Cloud-First Authentication:
+ * Checks local cache, and if not matched or outdated, queries Cloud Firestore in real-time.
+ */
+export async function authenticateUserAsync(
+  usernameInput: string,
+  passwordInput: string
+): Promise<{ success: boolean; user?: StoredUser; message?: string }> {
+  const cleanedUsername = toSlugUsername(usernameInput);
+  const trimmedPassword = passwordInput.trim();
+
+  // 1. Try querying Cloud Firestore first for freshest credentials
+  try {
+    let cloudUser = await queryUserByUsernameFromCloud(cleanedUsername);
+    if (!cloudUser && cleanedUsername === 'admin') {
+      cloudUser = await fetchUserFromCloud('teacher-nhi');
+    }
+
+    if (cloudUser) {
+      // Sync cloud record to local cache
+      const users = getStoredUsers();
+      const idx = users.findIndex((u) => u.id === cloudUser!.id);
+      if (idx !== -1) {
+        users[idx] = { ...users[idx], ...cloudUser };
+      } else {
+        users.push(cloudUser);
+      }
+      saveStoredUsers(users);
+
+      if (cloudUser.password === trimmedPassword) {
+        return { success: true, user: cloudUser };
+      } else {
+        return {
+          success: false,
+          message: 'Mật khẩu không chính xác. Hãy kiểm tra lại mật khẩu bạn đã đổi.',
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[Auth] Direct cloud query fallback to local cache:', err);
+  }
+
+  // 2. Fallback to local cache verification
+  return authenticateUser(usernameInput, passwordInput);
+}
+
+/**
  * Save current session user to localStorage
  */
 export function saveCurrentSession(user: UserAccount | null): void {
@@ -243,11 +292,9 @@ export function getSavedSession(): UserAccount | null {
     const data = localStorage.getItem(STORAGE_SESSION_KEY);
     if (data) {
       const parsed = JSON.parse(data);
-      // Verify user still exists in database
       const users = getStoredUsers();
       const current = users.find((u) => u.id === parsed.id);
       if (current) {
-        // Return updated user data without password
         const { password, ...safeUser } = current;
         return safeUser;
       }
@@ -260,6 +307,7 @@ export function getSavedSession(): UserAccount | null {
 
 /**
  * Update personal profile of a user (Avatar, interests, personality, motto, etc.)
+ * Saves BOTH locally and to Cloud Firestore.
  */
 export function updateUserProfile(
   userId: string,
@@ -273,14 +321,16 @@ export function updateUserProfile(
   const updated: StoredUser = {
     ...existing,
     ...updates,
-    // Do not allow changing id directly
     id: existing.id,
   };
 
   users[index] = updated;
   saveStoredUsers(users);
 
-  // If this user is a student, sync into students table as well
+  // Sync to Cloud Firestore in real-time
+  saveUserToCloud(updated);
+
+  // If student, sync into students table
   if (updated.studentId) {
     const students = getStoredStudents();
     const stIndex = students.findIndex((s) => s.stt === updated.studentId);
@@ -309,7 +359,7 @@ export function updateUserProfile(
 }
 
 /**
- * Change own password
+ * Change own password and sync to Cloud Firestore
  */
 export function changeUserPassword(
   userId: string,
@@ -334,7 +384,10 @@ export function changeUserPassword(
   users[index].isDefaultPassword = false;
   saveStoredUsers(users);
 
-  return { success: true, message: 'Đổi mật khẩu thành công!' };
+  // Sync to Cloud Firestore in real-time
+  saveUserToCloud(users[index]);
+
+  return { success: true, message: 'Đổi mật khẩu thành công! Mật khẩu mới đã được đồng bộ lên Cloud.' };
 }
 
 /**
@@ -354,9 +407,12 @@ export function adminResetUserPassword(
   users[index].isDefaultPassword = newPassword === '123456';
   saveStoredUsers(users);
 
+  // Sync to Cloud Firestore in real-time
+  saveUserToCloud(users[index]);
+
   return {
     success: true,
-    message: `Đã cập nhật mật khẩu cho "${users[index].name}" thành: ${newPassword}`,
+    message: `Đã cập nhật mật khẩu cho "${users[index].name}" thành: ${newPassword} (Đã đồng bộ lên Cloud)`,
   };
 }
 
@@ -383,7 +439,6 @@ export function adminAddNewMember(data: {
     return { success: false, message: 'Họ tên không hợp lệ để tạo tên đăng nhập.' };
   }
 
-  // Check if username already exists, add numeric suffix if collision
   let finalUsername = slug;
   let counter = 1;
   while (users.some((u) => u.username === finalUsername)) {
@@ -435,6 +490,9 @@ export function adminAddNewMember(data: {
   saveStoredStudents(students);
   saveStoredUsers(users);
 
+  // Sync new user to Cloud Firestore
+  saveUserToCloud(newUser);
+
   return {
     success: true,
     user: newUser,
@@ -459,11 +517,9 @@ export function adminRemoveMember(
     return { success: false, message: 'Không thể xóa tài khoản Quản trị viên chính.' };
   }
 
-  // Remove from users
   users.splice(index, 1);
   saveStoredUsers(users);
 
-  // If student, remove from students list
   if (target.studentId) {
     const students = getStoredStudents();
     const stIndex = students.findIndex((s) => s.stt === target.studentId);
@@ -472,6 +528,9 @@ export function adminRemoveMember(
       saveStoredStudents(students);
     }
   }
+
+  // Delete from Cloud Firestore
+  deleteUserFromCloud(userId);
 
   return {
     success: true,
@@ -499,7 +558,6 @@ export function adminUpdateMemberRole(
   target.roleTitle = newRoleTitle;
   saveStoredUsers(users);
 
-  // If this member is a student, also synchronize with students list
   if (target.studentId) {
     const students = getStoredStudents();
     const stIndex = students.findIndex((s) => s.stt === target.studentId);
@@ -511,6 +569,9 @@ export function adminUpdateMemberRole(
       saveStoredStudents(students);
     }
   }
+
+  // Sync updated role to Cloud Firestore
+  saveUserToCloud(target);
 
   return {
     success: true,

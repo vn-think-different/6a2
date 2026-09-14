@@ -61,6 +61,7 @@ import {
   saveCurrentSession,
   getStoredStudents,
   getStoredUsers,
+  saveStoredUsers,
   getStoredPosts,
   saveStoredPosts,
 } from './db/authDatabase';
@@ -81,6 +82,7 @@ import {
   subscribeToStudyDocs,
   saveStudyDocToCloud,
   deleteStudyDocFromCloud,
+  subscribeToUsers,
 } from './db/firestoreService';
 
 export default function App() {
@@ -119,9 +121,25 @@ export default function App() {
       setStudyDocuments(cloudDocs);
     }, studyDocuments);
 
+    const unsubUsers = subscribeToUsers((cloudUsers) => {
+      saveStoredUsers(cloudUsers);
+      setStudents(getStoredStudents());
+      // Refresh current session if remote updates happened (e.g. from mobile or other device)
+      const currentSession = getSavedSession();
+      if (currentSession) {
+        const fresh = cloudUsers.find((u) => u.id === currentSession.id);
+        if (fresh) {
+          const { password, ...safeUser } = fresh;
+          setCurrentUser(safeUser);
+          saveCurrentSession(safeUser);
+        }
+      }
+    }, getStoredUsers());
+
     return () => {
       unsubPosts();
       unsubDocs();
+      unsubUsers();
     };
   }, []);
 

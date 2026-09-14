@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Lock,
   User,
@@ -15,7 +15,14 @@ import {
   ShieldCheck,
   GraduationCap,
 } from 'lucide-react';
-import { authenticateUser, getStoredUsers, toSlugUsername, StoredUser } from '../db/authDatabase';
+import {
+  authenticateUserAsync,
+  getStoredUsers,
+  saveStoredUsers,
+  toSlugUsername,
+  StoredUser,
+} from '../db/authDatabase';
+import { subscribeToUsers } from '../db/firestoreService';
 import { CLASS_INFO } from '../data/mockData';
 import { UserAccount } from '../types';
 
@@ -29,14 +36,22 @@ export const WelcomeLoginView: React.FC<WelcomeLoginViewProps> = ({ onLoginSucce
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [allUsers, setAllUsers] = useState<StoredUser[]>(() => getStoredUsers());
 
   // Quick lookup drawer/modal for students finding their username
   const [showLookupModal, setShowLookupModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const allUsers = getStoredUsers();
+  // Subscribe to real-time users from Firestore
+  useEffect(() => {
+    const unsub = subscribeToUsers((cloudUsers) => {
+      setAllUsers(cloudUsers);
+      saveStoredUsers(cloudUsers);
+    }, getStoredUsers());
+    return () => unsub();
+  }, []);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -50,8 +65,8 @@ export const WelcomeLoginView: React.FC<WelcomeLoginViewProps> = ({ onLoginSucce
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const result = authenticateUser(usernameInput, passwordInput);
+    try {
+      const result = await authenticateUserAsync(usernameInput, passwordInput);
       setIsLoading(false);
       if (result.success && result.user) {
         const { password, ...safeUser } = result.user;
@@ -59,7 +74,10 @@ export const WelcomeLoginView: React.FC<WelcomeLoginViewProps> = ({ onLoginSucce
       } else {
         setErrorMessage(result.message || 'Đăng nhập không thành công.');
       }
-    }, 300);
+    } catch (err: any) {
+      setIsLoading(false);
+      setErrorMessage('Đã xảy ra lỗi khi xác thực tài khoản. Vui lòng thử lại.');
+    }
   };
 
   const handleQuickSelect = (user: StoredUser) => {

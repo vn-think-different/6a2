@@ -1,44 +1,109 @@
 {
   "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account for class 6A2 members",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID" },
+        "username": { "type": "string", "description": "Username slug without accents" },
+        "password": { "type": "string", "description": "User password" },
+        "name": { "type": "string", "description": "Full display name" },
+        "role": { "type": "string", "description": "admin | sub_admin | ambassador | student | parent" },
+        "roleTitle": { "type": "string", "description": "Role title" },
+        "avatar": { "type": "string", "description": "Avatar URL" },
+        "studentId": { "type": "number", "description": "Student number STT" },
+        "badge": { "type": "string", "description": "Class badge label" },
+        "dob": { "type": "string", "description": "Date of birth" },
+        "gender": { "type": "string", "description": "Gender" },
+        "interests": { "type": "string", "description": "Personal hobbies and interests" },
+        "personality": { "type": "string", "description": "Personality traits" },
+        "motto": { "type": "string", "description": "Motto or personal quote" },
+        "isDefaultPassword": { "type": "boolean", "description": "Whether password is still 123456" }
+      },
+      "required": ["id", "username", "name", "role", "avatar"]
+    },
     "Post": {
-      "collection": "posts",
-      "fields": {
+      "title": "Post",
+      "description": "Classroom community feed post",
+      "type": "object",
+      "properties": {
         "id": { "type": "string", "description": "Unique post ID" },
         "authorId": { "type": "string", "description": "Author user ID" },
         "authorName": { "type": "string", "description": "Author display name" },
         "authorRole": { "type": "string", "description": "Author role" },
+        "authorRoleTitle": { "type": "string", "description": "Author role title" },
         "authorAvatar": { "type": "string", "description": "Author avatar URL" },
         "category": { "type": "string", "description": "Post category tag" },
+        "categoryLabel": { "type": "string", "description": "Category human readable label" },
         "content": { "type": "string", "description": "Post text content" },
+        "imageUrl": { "type": "string", "description": "Optional attached image URL" },
         "timestamp": { "type": "string", "description": "Created time" },
-        "likes": { "type": "number", "description": "Like counter" },
-        "status": { "type": "string", "description": "published | pending | rejected" }
-      }
+        "status": { "type": "string", "description": "approved | pending | rejected" },
+        "isPinned": { "type": "boolean", "description": "Pinned post status" }
+      },
+      "required": ["id", "authorId", "authorName", "content", "category", "status"]
     },
-    "SavedExercise": {
-      "collection": "saved_exercises",
-      "fields": {
+    "AISavedExercise": {
+      "title": "AISavedExercise",
+      "description": "Saved AI exercise solution in student notebook",
+      "type": "object",
+      "properties": {
         "id": { "type": "string", "description": "Unique exercise ID" },
         "userId": { "type": "string", "description": "Student user ID" },
         "userName": { "type": "string", "description": "Student name" },
         "subject": { "type": "string", "description": "Subject name" },
         "topic": { "type": "string", "description": "Topic or lesson" },
         "problemSummary": { "type": "string", "description": "Short problem summary" },
-        "savedAt": { "type": "string", "description": "Saved timestamp" },
-        "notes": { "type": "string", "description": "Student personalized notes" }
-      }
+        "savedAt": { "type": "string", "description": "Saved date string" }
+      },
+      "required": ["id", "subject", "topic"]
     },
     "StudentRAGProfile": {
-      "collection": "student_rag_profiles",
-      "fields": {
+      "title": "StudentRAGProfile",
+      "description": "Personalized learning profile and memory notes",
+      "type": "object",
+      "properties": {
         "userId": { "type": "string", "description": "Student user ID" },
         "studentName": { "type": "string", "description": "Student display name" },
-        "gradeLevel": { "type": "string", "description": "Grade 6" },
-        "learningStyle": { "type": "string", "description": "Visual | StepByStep | Auditory | Practical" },
-        "targetSubjects": { "type": "array", "description": "Subjects requiring focus" },
-        "ragMemoryNotes": { "type": "array", "description": "Personalized facts and learning memory points" },
-        "updatedAt": { "type": "string", "description": "Last updated time" }
-      }
+        "gradeLevel": { "type": "string", "description": "Grade level" },
+        "preferredLearningStyle": { "type": "string", "description": "Learning style" }
+      },
+      "required": ["userId", "studentName"]
+    },
+    "StudyDocument": {
+      "title": "StudyDocument",
+      "description": "Document shared in study corner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Document ID" },
+        "title": { "type": "string", "description": "Document title" },
+        "subject": { "type": "string", "description": "Subject name" },
+        "content": { "type": "string", "description": "Detailed document content" }
+      },
+      "required": ["id", "title", "subject"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Class 6A2 member accounts with authentication credentials and profiles"
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/Post" },
+      "description": "Community posts and moderation status"
+    },
+    "/saved_exercises/{exerciseId}": {
+      "schema": { "$ref": "#/entities/AISavedExercise" },
+      "description": "AI-solved exercises saved by students"
+    },
+    "/student_rag_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/StudentRAGProfile" },
+      "description": "Personalized learning preferences and memory points"
+    },
+    "/study_documents/{documentId}": {
+      "schema": { "$ref": "#/entities/StudyDocument" },
+      "description": "Curated learning materials and study guides"
     }
   }
 }

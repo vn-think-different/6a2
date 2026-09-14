@@ -261,13 +261,23 @@ export interface AISolutionStep {
 }
 
 export interface AISolutionDiagram {
-  type: 'none' | 'map' | 'venn' | 'geometry' | 'number_line' | 'bar_chart' | 'flowchart' | 'science' | 'english_flashcard' | 'mindmap';
+  type: 'none' | 'map' | 'venn' | 'geometry' | 'number_line' | 'bar_chart' | 'flowchart' | 'science' | 'english_flashcard' | 'mindmap' | 'art_sketch' | 'image_gallery';
   title: string;
   description: string;
   chartData?: { label: string; value: number; color?: string; note?: string }[];
   visualPoints?: string[];
   imageUrl?: string;
   badge?: string;
+  illustrations?: {
+    title: string;
+    subtitle?: string;
+    description: string;
+    imageUrl?: string;
+    colorPalette?: string[];
+    compositionLayers?: string[];
+    tips?: string;
+  }[];
+  drawingSteps?: { step: number; title: string; detail: string }[];
 }
 
 export interface AIFinalAnswer {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { CreatePostModal } from './components/CreatePostModal';
 import { ListeningModal } from './components/ListeningModal';
@@ -74,6 +74,14 @@ import {
   addScheduleEvent,
   deleteScheduleEvent,
 } from './db/studyCornerDatabase';
+import {
+  subscribeToPosts,
+  savePostToCloud,
+  deletePostFromCloud,
+  subscribeToStudyDocs,
+  saveStudyDocToCloud,
+  deleteStudyDocFromCloud,
+} from './db/firestoreService';
 
 export default function App() {
   // Check if session exists in DB, otherwise null -> show WelcomeLoginView
@@ -100,6 +108,23 @@ export default function App() {
   const [studyDocuments, setStudyDocuments] = useState<StudyDocument[]>(() => getStoredStudyDocuments());
   const [scheduleEvents, setScheduleEvents] = useState<ScheduleEvent[]>(() => getStoredScheduleEvents());
 
+  // Cloud Firestore Real-time Synchronization
+  useEffect(() => {
+    const unsubPosts = subscribeToPosts((cloudPosts) => {
+      setPosts(cloudPosts);
+      saveStoredPosts(cloudPosts);
+    }, posts);
+
+    const unsubDocs = subscribeToStudyDocs((cloudDocs) => {
+      setStudyDocuments(cloudDocs);
+    }, studyDocuments);
+
+    return () => {
+      unsubPosts();
+      unsubDocs();
+    };
+  }, []);
+
   // Count pending posts for moderation badge
   const pendingPosts = posts.filter((p) => p.status === 'pending');
   const pendingCount = pendingPosts.length;
@@ -107,21 +132,26 @@ export default function App() {
   const handleAddStudyDocument = (doc: StudyDocument) => {
     const updated = addStudyDocument(doc);
     setStudyDocuments(updated);
+    saveStudyDocToCloud(doc);
   };
 
   const handleUpdateStudyDocument = (doc: StudyDocument) => {
     const updated = updateStudyDocument(doc);
     setStudyDocuments(updated);
+    saveStudyDocToCloud(doc);
   };
 
   const handleDeleteStudyDocument = (id: string) => {
     const updated = deleteStudyDocument(id);
     setStudyDocuments(updated);
+    deleteStudyDocFromCloud(id);
   };
 
   const handleToggleLikeStudyDocument = (id: string) => {
     const updated = toggleStudyDocumentLike(id);
     setStudyDocuments(updated);
+    const target = updated.find((d) => d.id === id);
+    if (target) saveStudyDocToCloud(target);
   };
 
   const handleAddScheduleEvent = (evt: ScheduleEvent) => {
@@ -147,11 +177,14 @@ export default function App() {
     const updated = posts.map((p) => (p.id === postId ? { ...p, imageUrl: newUrl } : p));
     setPosts(updated);
     saveStoredPosts(updated);
+    const target = updated.find((p) => p.id === postId);
+    if (target) savePostToCloud(target);
   };
 
   // Post Interactions (Facebook reaction style)
   const handleLikePost = (postId: string, reactionType: Reaction['type']) => {
     if (!currentUser) return;
+    let targetPost: Post | undefined;
     const updated = posts.map((post) => {
       if (post.id === postId) {
         const existingReactionIndex = post.likes.findIndex((r) => r.userId === currentUser.id);
@@ -173,15 +206,18 @@ export default function App() {
             type: reactionType,
           });
         }
-        return {
+        const modified = {
           ...post,
           likes: newLikes,
         };
+        targetPost = modified;
+        return modified;
       }
       return post;
     });
     setPosts(updated);
     saveStoredPosts(updated);
+    if (targetPost) savePostToCloud(targetPost);
   };
 
   const handleCommentPost = (postId: string, content: string) => {
@@ -195,17 +231,21 @@ export default function App() {
       content,
       timestamp: 'Vừa xong',
     };
+    let targetPost: Post | undefined;
     const updated = posts.map((post) => {
       if (post.id === postId) {
-        return {
+        const modified = {
           ...post,
           comments: [...post.comments, newComment],
         };
+        targetPost = modified;
+        return modified;
       }
       return post;
     });
     setPosts(updated);
     saveStoredPosts(updated);
+    if (targetPost) savePostToCloud(targetPost);
   };
 
   // Create post: connected to currentUser permissions
@@ -225,6 +265,7 @@ export default function App() {
     const updated = [newPost, ...posts];
     setPosts(updated);
     saveStoredPosts(updated);
+    savePostToCloud(newPost);
   };
 
   // Edit post handler: authors can edit their own posts; admins/sub-admins can edit any post
@@ -248,9 +289,10 @@ export default function App() {
       imageUrl?: string;
     }
   ) => {
+    let targetPost: Post | undefined;
     const updated = posts.map((p) => {
       if (p.id === postId) {
-        return {
+        const modified = {
           ...p,
           content: updatedData.content,
           ...(updatedData.category ? { category: updatedData.category } : {}),
@@ -259,11 +301,14 @@ export default function App() {
           isEdited: true,
           editedAt: 'Vừa xong',
         };
+        targetPost = modified;
+        return modified;
       }
       return p;
     });
     setPosts(updated);
     saveStoredPosts(updated);
+    if (targetPost) savePostToCloud(targetPost);
   };
 
   // Delete post handler: authors or admins can delete
@@ -281,29 +326,57 @@ export default function App() {
       const updated = posts.filter((p) => p.id !== postId);
       setPosts(updated);
       saveStoredPosts(updated);
+      deletePostFromCloud(postId);
     }
   };
 
   const handleApprovePost = (postId: string) => {
-    const updated = posts.map((p) => (p.id === postId ? { ...p, status: 'approved' as const } : p));
+    let targetPost: Post | undefined;
+    const updated = posts.map((p) => {
+      if (p.id === postId) {
+        const modified = { ...p, status: 'approved' as const };
+        targetPost = modified;
+        return modified;
+      }
+      return p;
+    });
     setPosts(updated);
     saveStoredPosts(updated);
+    if (targetPost) savePostToCloud(targetPost);
   };
 
   const handleRejectPost = (postId: string, reason?: string) => {
-    const updated = posts.map((p) =>
-      p.id === postId
-        ? { ...p, status: 'rejected' as const, rejectionReason: reason || 'Nội dung chưa phù hợp' }
-        : p
-    );
+    let targetPost: Post | undefined;
+    const updated = posts.map((p) => {
+      if (p.id === postId) {
+        const modified = {
+          ...p,
+          status: 'rejected' as const,
+          rejectionReason: reason || 'Nội dung chưa phù hợp',
+        };
+        targetPost = modified;
+        return modified;
+      }
+      return p;
+    });
     setPosts(updated);
     saveStoredPosts(updated);
+    if (targetPost) savePostToCloud(targetPost);
   };
 
   const handleTogglePin = (postId: string) => {
-    const updated = posts.map((p) => (p.id === postId ? { ...p, isPinned: !p.isPinned } : p));
+    let targetPost: Post | undefined;
+    const updated = posts.map((p) => {
+      if (p.id === postId) {
+        const modified = { ...p, isPinned: !p.isPinned };
+        targetPost = modified;
+        return modified;
+      }
+      return p;
+    });
     setPosts(updated);
     saveStoredPosts(updated);
+    if (targetPost) savePostToCloud(targetPost);
   };
 
   // 5 Minutes Listening submissions

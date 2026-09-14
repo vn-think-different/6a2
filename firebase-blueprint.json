@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "Post": {
+      "collection": "posts",
+      "fields": {
+        "id": { "type": "string", "description": "Unique post ID" },
+        "authorId": { "type": "string", "description": "Author user ID" },
+        "authorName": { "type": "string", "description": "Author display name" },
+        "authorRole": { "type": "string", "description": "Author role" },
+        "authorAvatar": { "type": "string", "description": "Author avatar URL" },
+        "category": { "type": "string", "description": "Post category tag" },
+        "content": { "type": "string", "description": "Post text content" },
+        "timestamp": { "type": "string", "description": "Created time" },
+        "likes": { "type": "number", "description": "Like counter" },
+        "status": { "type": "string", "description": "published | pending | rejected" }
+      }
+    },
+    "SavedExercise": {
+      "collection": "saved_exercises",
+      "fields": {
+        "id": { "type": "string", "description": "Unique exercise ID" },
+        "userId": { "type": "string", "description": "Student user ID" },
+        "userName": { "type": "string", "description": "Student name" },
+        "subject": { "type": "string", "description": "Subject name" },
+        "topic": { "type": "string", "description": "Topic or lesson" },
+        "problemSummary": { "type": "string", "description": "Short problem summary" },
+        "savedAt": { "type": "string", "description": "Saved timestamp" },
+        "notes": { "type": "string", "description": "Student personalized notes" }
+      }
+    },
+    "StudentRAGProfile": {
+      "collection": "student_rag_profiles",
+      "fields": {
+        "userId": { "type": "string", "description": "Student user ID" },
+        "studentName": { "type": "string", "description": "Student display name" },
+        "gradeLevel": { "type": "string", "description": "Grade 6" },
+        "learningStyle": { "type": "string", "description": "Visual | StepByStep | Auditory | Practical" },
+        "targetSubjects": { "type": "array", "description": "Subjects requiring focus" },
+        "ragMemoryNotes": { "type": "array", "description": "Personalized facts and learning memory points" },
+        "updatedAt": { "type": "string", "description": "Last updated time" }
+      }
+    }
+  }
+}

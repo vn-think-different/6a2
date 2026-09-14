@@ -31,12 +31,29 @@ import {
   MapPin,
   ExternalLink,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  UserCheck,
+  Settings2,
+  Cloud,
+  Layers,
+  Palette,
+  Eye,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserAccount, AIExerciseSolution, AISavedExercise } from '../types';
 import { MathView, FormattedTextWithMath } from '../components/MathView';
 import { SubjectIllustration } from '../components/SubjectIllustration';
+import {
+  subscribeToSavedExercises,
+  saveExerciseToCloud,
+  deleteExerciseFromCloud,
+  subscribeToStudentRAGProfile,
+  saveStudentRAGProfile,
+  StudentRAGProfile,
+  DEFAULT_RAG_PROFILE
+} from '../db/firestoreService';
 
 interface StudyWithAIViewProps {
   currentUser: UserAccount;
@@ -44,6 +61,12 @@ interface StudyWithAIViewProps {
 
 // Preset Grade 6 curriculum sample exercises for 1-click test
 const SAMPLE_EXERCISES = [
+  {
+    subject: 'Mỹ thuật',
+    title: 'Vẽ tranh phong cảnh Sông Núi - 3 mẫu tranh và bố cục',
+    prompt: 'Em hãy hướng dẫn vẽ tranh phong cảnh Sông Núi quê hương (cho học sinh lớp 6), cung cấp 2-3 ý tưởng tranh mẫu có bố cục xa gần và từng bước vẽ chi tiết.',
+    topic: 'Chủ đề: Vẻ đẹp quê hương - Mỹ thuật 6'
+  },
   {
     subject: 'Lịch sử & Địa lý',
     title: 'Vị trí quần đảo Hoàng Sa trên bản đồ Việt Nam',
@@ -91,10 +114,8 @@ const SAMPLE_EXERCISES = [
 // Helper: Convert raw LaTeX / math notation to natural, pedagogical spoken Vietnamese
 function sanitizeMathForVietnameseSpeech(text: string): string {
   let s = text;
-  // Clean markdown bold/italic/code
   s = s.replace(/\*\*/g, '').replace(/\*/g, '').replace(/`/g, '');
 
-  // Sets and element relations (Toán học tập hợp)
   s = s.replace(/\\notin/g, ' không thuộc ');
   s = s.replace(/∉/g, ' không thuộc ');
   s = s.replace(/\\in/g, ' thuộc ');
@@ -109,7 +130,6 @@ function sanitizeMathForVietnameseSpeech(text: string): string {
   s = s.replace(/\\emptyset/g, ' tập hợp rỗng ');
   s = s.replace(/∅/g, ' tập hợp rỗng ');
 
-  // Logic & Arrows
   s = s.replace(/\\Rightarrow/g, ' suy ra ');
   s = s.replace(/⇒/g, ' suy ra ');
   s = s.replace(/\\Leftrightarrow/g, ' tương đương ');
@@ -123,16 +143,13 @@ function sanitizeMathForVietnameseSpeech(text: string): string {
   s = s.replace(/\\ge/g, ' lớn hơn hoặc bằng ');
   s = s.replace(/≥/g, ' lớn hơn hoặc bằng ');
 
-  // Number sets
   s = s.replace(/\\mathbb\{N\}\^\*/g, ' tập hợp số tự nhiên khác không N sao ');
   s = s.replace(/\\mathbb\{N\}/g, ' tập hợp số tự nhiên N ');
   s = s.replace(/\\mathbb\{Z\}/g, ' tập hợp số nguyên Z ');
   s = s.replace(/\\mathbb\{Q\}/g, ' tập hợp số hữu tỉ Q ');
 
-  // Text wrapper in LaTeX
   s = s.replace(/\\text\{([^}]+)\}/g, ' $1 ');
 
-  // Arithmetic operations
   s = s.replace(/\\times/g, ' nhân ');
   s = s.replace(/×/g, ' nhân ');
   s = s.replace(/\\cdot/g, ' nhân ');
@@ -147,7 +164,6 @@ function sanitizeMathForVietnameseSpeech(text: string): string {
   s = s.replace(/\^3/g, ' lập phương ');
   s = s.replace(/\^\{?([0-9a-zA-Z]+)\}?/g, ' mũ $1 ');
 
-  // Units
   s = s.replace(/\\text\{cm\}\^3|cm\^3|cm³/g, ' xen-ti-mét khối ');
   s = s.replace(/\\text\{m\}\^3|m\^3|m³/g, ' mét khối ');
   s = s.replace(/\\text\{cm\}\^2|cm\^2|cm²/g, ' xen-ti-mét vuông ');
@@ -157,13 +173,11 @@ function sanitizeMathForVietnameseSpeech(text: string): string {
   s = s.replace(/°C|\^\\circ\s*C/g, ' độ C ');
   s = s.replace(/°|\^\\circ/g, ' độ ');
 
-  // Quiz Options
   s = s.replace(/\bA\.\s*/g, 'Phương án A: ');
   s = s.replace(/\bB\.\s*/g, 'Phương án B: ');
   s = s.replace(/\bC\.\s*/g, 'Phương án C: ');
   s = s.replace(/\bD\.\s*/g, 'Phương án D: ');
 
-  // Strip remaining LaTeX formatting characters
   s = s.replace(/[\{\}\$\\\_\|]/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
   return s;
@@ -171,8 +185,9 @@ function sanitizeMathForVietnameseSpeech(text: string): string {
 
 const SUBJECTS = [
   'Tất cả môn',
-  'Toán học',
+  'Mỹ thuật',
   'Lịch sử & Địa lý',
+  'Toán học',
   'Tiếng Anh',
   'Khoa học tự nhiên',
   'Ngữ văn',
@@ -194,9 +209,9 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
 
   // Results state
   const [solution, setSolution] = useState<AIExerciseSolution | null>(null);
-  const [activeTabSub, setActiveTabSub] = useState<'solver' | 'saved'>('solver');
+  const [activeTabSub, setActiveTabSub] = useState<'solver' | 'saved' | 'rag_profile'>('solver');
   
-  // Interactive features
+  // Interactive features & Notebook
   const [copied, setCopied] = useState<boolean>(false);
   const [savedExercises, setSavedExercises] = useState<AISavedExercise[]>(() => {
     try {
@@ -209,6 +224,15 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
   const [isSavedCurrent, setIsSavedCurrent] = useState<boolean>(false);
   const [showSimilarAnswer, setShowSimilarAnswer] = useState<boolean>(false);
 
+  // RAG Profile & Memory State
+  const [ragProfile, setRagProfile] = useState<StudentRAGProfile>(() => ({
+    ...DEFAULT_RAG_PROFILE,
+    userId: currentUser.id,
+    studentName: currentUser.name,
+  }));
+  const [newMemoryNote, setNewMemoryNote] = useState<string>('');
+  const [isSavingProfile, setIsSavingProfile] = useState<boolean>(false);
+
   // Step follow-up questioning state
   const [stepAskingIndex, setStepAskingIndex] = useState<number | null>(null);
   const [stepQuestionText, setStepQuestionText] = useState<string>('');
@@ -220,6 +244,34 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
   const [speechSpeed, setSpeechSpeed] = useState<number>(0.9);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
 
+  // 1. Subscribe to Saved Exercises & Cloud Firestore Sync
+  useEffect(() => {
+    const unsub = subscribeToSavedExercises(
+      currentUser.id,
+      (cloudExercises) => {
+        setSavedExercises(cloudExercises);
+        try {
+          localStorage.setItem('6a2_saved_ai_exercises', JSON.stringify(cloudExercises));
+        } catch {}
+      },
+      savedExercises
+    );
+    return () => unsub();
+  }, [currentUser.id]);
+
+  // 2. Subscribe to Student RAG Profile
+  useEffect(() => {
+    const unsub = subscribeToStudentRAGProfile(
+      currentUser.id,
+      currentUser.name,
+      (cloudProfile) => {
+        setRagProfile(cloudProfile);
+      }
+    );
+    return () => unsub();
+  }, [currentUser.id, currentUser.name]);
+
+  // Load voices for Web Speech API
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       const loadVoices = () => {
@@ -231,23 +283,18 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
     }
   }, []);
 
-  // Save exercises to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('6a2_saved_ai_exercises', JSON.stringify(savedExercises));
-    } catch (e) {
-      console.warn('Cannot save to localStorage', e);
-    }
-  }, [savedExercises]);
-
   // Check if current solution is already saved
   useEffect(() => {
     if (!solution) {
       setIsSavedCurrent(false);
       return;
     }
+    const currentRes = typeof solution.finalAnswer === 'string'
+      ? solution.finalAnswer
+      : solution.finalAnswer?.result;
+
     const exists = savedExercises.some(
-      (item) => item.problemSummary === solution.problemSummary && item.finalAnswer.result === solution.finalAnswer.result
+      (item) => item.problemSummary === solution.problemSummary && item.finalAnswer?.result === currentRes
     );
     setIsSavedCurrent(exists);
   }, [solution, savedExercises]);
@@ -291,9 +338,10 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
     setSelectedImage(null);
     setImageName('');
     setErrorMessage(null);
+    setActiveTabSub('solver');
   };
 
-  // Submit to AI
+  // Submit to AI with RAG & Personalization
   const handleSolveExercise = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!promptText.trim() && !selectedImage) {
@@ -301,190 +349,109 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
       return;
     }
 
-    setErrorMessage(null);
     setIsLoading(true);
-    setLoadingStage('Đang kết nối Trợ lý AI Google...');
-    setShowSimilarAnswer(false);
+    setErrorMessage(null);
+    setSolution(null);
     setStepAnswers({});
     setStepAskingIndex(null);
+    setActiveTabSub('solver');
 
-    const stages = [
-      'Đang nhận diện nội dung đề bài...',
-      'Đang đối chiếu chuẩn kiến thức SGK Lớp 6...',
-      'Đang giải chi tiết từng bước sư phạm...',
-      'Đang chuẩn hóa đáp số và mẹo ghi nhớ...'
-    ];
+    setLoadingStage('Đang đọc đề bài và đối chiếu chuẩn SGK lớp 6...');
+    const stageTimer1 = setTimeout(() => {
+      setLoadingStage(`Đang áp dụng phong cách học "${ragProfile.preferredLearningStyle}" cho ${currentUser.name}...`);
+    }, 900);
 
-    let stageIdx = 0;
-    const stageInterval = setInterval(() => {
-      stageIdx = (stageIdx + 1) % stages.length;
-      setLoadingStage(stages[stageIdx]);
-    }, 1100);
+    const stageTimer2 = setTimeout(() => {
+      setLoadingStage('Đang phác thảo sơ đồ minh họa trực quan & từng bước giải...');
+    }, 1800);
 
     try {
-      const response = await fetch('/api/ai/solve-exercise', {
+      let base64Data: string | undefined = undefined;
+      let mimeType: string | undefined = undefined;
+
+      if (selectedImage) {
+        const parts = selectedImage.split(';base64,');
+        if (parts.length === 2) {
+          mimeType = parts[0].replace('data:', '');
+          base64Data = parts[1];
+        }
+      }
+
+      const res = await fetch('/api/ai/solve-exercise', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
-          image: selectedImage,
+          image: base64Data,
+          mimeType,
           subject: selectedSubject !== 'Tất cả môn' ? selectedSubject : undefined,
+          studentName: currentUser.name,
+          learningStyle: ragProfile.preferredLearningStyle,
+          ragMemoryNotes: ragProfile.memoryPoints,
+          weakAreas: ragProfile.weakAreas,
+          recentTopics: ragProfile.recentTopics,
         }),
       });
 
-      clearInterval(stageInterval);
-
-      if (!response.ok) {
-        throw new Error('Máy chủ phản hồi không thành công. Vui lòng thử lại!');
+      const json = await res.json();
+      if (!json.success || !json.data) {
+        throw new Error(json.error || 'Không thể giải bài tập lúc này.');
       }
 
-      const result = await response.json();
-      if (result.success && result.data) {
-        const enrichedSolution: AIExerciseSolution = {
-          ...result.data,
-          id: 'sol_' + Date.now(),
-          timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-          userPrompt: promptText,
-          userImage: selectedImage || undefined,
-        };
-        setSolution(enrichedSolution);
+      // Format & Normalize Solution
+      const rawSol = json.data;
+      const normalizedSol: AIExerciseSolution = {
+        problemSummary: rawSol.problemSummary || promptText.slice(0, 80) || 'Bài tập lớp 6',
+        subject: rawSol.subject || (selectedSubject !== 'Tất cả môn' ? selectedSubject : 'Môn học lớp 6'),
+        topic: rawSol.topic || 'Chương trình THCS Lớp 6',
+        givenData: Array.isArray(rawSol.givenData) ? rawSol.givenData : ['Đề bài yêu cầu phân tích và giải chi tiết'],
+        toFind: rawSol.toFind || 'Yêu cầu cần tìm của bài toán / đề bài',
+        keyConcepts: Array.isArray(rawSol.keyConcepts) ? rawSol.keyConcepts : ['Quy tắc và kiến thức trọng tâm SGK lớp 6'],
+        steps: Array.isArray(rawSol.steps) ? rawSol.steps : [],
+        visualDiagram: rawSol.visualDiagram,
+        finalAnswer: typeof rawSol.finalAnswer === 'string'
+          ? {
+              result: rawSol.finalAnswer,
+              conclusion: rawSol.finalAnswer,
+              verification: 'Con hãy đối chiếu lại từng bước giải trên nhé!'
+            }
+          : {
+              result: rawSol.finalAnswer?.result || rawSol.finalAnswer?.conclusion || 'Hoàn thành bài giải',
+              conclusion: rawSol.finalAnswer?.conclusion || rawSol.finalAnswer?.result || 'Con hãy đối chiếu lại từng bước giải trên nhé!',
+              verification: rawSol.finalAnswer?.verification || 'Thử lại bằng cách đối chiếu với đề bài ban đầu.'
+            },
+        teacherEncouragement: rawSol.teacherEncouragement || `Thầy/Cô rất tự hào về sự chăm chỉ học tập của ${currentUser.name}!`,
+        userPrompt: promptText,
+        timestamp: new Date().toISOString(),
+      };
 
+      setSolution(normalizedSol);
+
+      // Celebrate success with gentle confetti
+      try {
         confetti({
           particleCount: 40,
-          spread: 60,
-          origin: { y: 0.6 }
+          spread: 55,
+          origin: { y: 0.7 },
         });
-      } else {
-        throw new Error(result.error || 'Không thể giải bài tập lúc này.');
-      }
+      } catch {}
     } catch (err: any) {
-      clearInterval(stageInterval);
       console.error(err);
-      setErrorMessage(err.message || 'Có lỗi xảy ra khi gửi bài lên AI. Vui lòng thử lại!');
+      setErrorMessage(err.message || 'Đã xảy ra lỗi khi kết nối với Gia sư AI. Vui lòng thử lại!');
     } finally {
+      clearTimeout(stageTimer1);
+      clearTimeout(stageTimer2);
       setIsLoading(false);
     }
   };
 
-  // Toggle Save Current Solution
-  const handleToggleSave = () => {
-    if (!solution) return;
-    if (isSavedCurrent) {
-      setSavedExercises((prev) =>
-        prev.filter((item) => item.problemSummary !== solution.problemSummary)
-      );
-      setIsSavedCurrent(false);
-    } else {
-      const newSaved: AISavedExercise = {
-        ...solution,
-        savedAt: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-      };
-      setSavedExercises((prev) => [newSaved, ...prev]);
-      setIsSavedCurrent(true);
-    }
-  };
-
-  // Copy full solution text
-  const handleCopySolution = () => {
-    if (!solution) return;
-    const textLines = [
-      `📚 BÀI TẬP LỚP 6A2 - LỜI GIẢI TỪ TRỢ LÝ AI`,
-      `Môn: ${solution.subject} • Chủ đề: ${solution.topic}`,
-      `Đề bài: ${solution.problemSummary}`,
-      `---------------------------------`,
-      `📖 CÁC BƯỚC THỰC HIỆN:`,
-      ...solution.steps.map(
-        (s) => `${s.title}:\n- Lời giải: ${s.explanation}${s.mathExpression ? `\n- Biểu thức: ${s.mathExpression}` : ''}`
-      ),
-      `---------------------------------`,
-      `🎯 ĐÁP SỐ: ${solution.finalAnswer.result}`,
-      `Kết luận: ${solution.finalAnswer.conclusion}`,
-      solution.finalAnswer.verification ? `Cách kiểm tra: ${solution.finalAnswer.verification}` : '',
-    ].filter(Boolean).join('\n\n');
-
-    navigator.clipboard.writeText(textLines);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const stopSpeaking = () => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      setSpeakingId(null);
-    }
-  };
-
-  // Enhanced Speak step
-  const speakText = (rawText: string, id: string, forceLang?: 'en-US' | 'vi-VN') => {
-    if (!('speechSynthesis' in window)) {
-      alert('Trình duyệt của bạn không hỗ trợ phát âm thanh.');
-      return;
-    }
-
-    if (speakingId === id) {
-      stopSpeaking();
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-
-    // Language resolution: Strictly Vietnamese for all subjects unless subject is 'Tiếng Anh' or explicitly forced to 'en-US'
-    const isEnglish = forceLang === 'en-US' || (forceLang !== 'vi-VN' && solution?.subject === 'Tiếng Anh');
-    const targetLang: 'en-US' | 'vi-VN' = isEnglish ? 'en-US' : 'vi-VN';
-
-    let cleanedText = rawText;
-    if (targetLang === 'vi-VN') {
-      cleanedText = sanitizeMathForVietnameseSpeech(rawText);
-    } else {
-      cleanedText = cleanedText
-        .replace(/\\text\{([^}]+)\}/g, '$1')
-        .replace(/[\$\{\}\\]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-
-    if (!cleanedText) return;
-
-    const utterance = new SpeechSynthesisUtterance(cleanedText);
-    utterance.lang = targetLang;
-    utterance.rate = speechSpeed;
-
-    if (voices.length > 0) {
-      if (targetLang === 'vi-VN') {
-        const viVoice = voices.find(v => 
-          v.lang.toLowerCase().startsWith('vi') || 
-          v.lang.toLowerCase().includes('vn') || 
-          v.name.toLowerCase().includes('vietnam') ||
-          v.name.toLowerCase().includes('vietnamese') ||
-          v.name.toLowerCase().includes('hoaimy') ||
-          v.name.toLowerCase().includes('namminh') ||
-          v.name.toLowerCase().includes('mai') ||
-          v.name.toLowerCase().includes('linh') ||
-          v.name.toLowerCase().includes('an')
-        );
-        if (viVoice) utterance.voice = viVoice;
-      } else {
-        const enVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('US') || v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira'))
-        ) || voices.find(v => v.lang.startsWith('en'));
-        if (enVoice) utterance.voice = enVoice;
-      }
-    }
-
-    utterance.onend = () => setSpeakingId(null);
-    utterance.onerror = () => setSpeakingId(null);
-
-    setSpeakingId(id);
-    window.speechSynthesis.speak(utterance);
-  };
-
   // Ask AI about a specific step
-  const handleAskStep = async (stepIndex: number) => {
+  const handleAskStep = async (stepIdx: number) => {
     if (!stepQuestionText.trim() || !solution) return;
+    const step = solution.steps[stepIdx];
+    if (!step) return;
 
-    const step = solution.steps[stepIndex];
     setIsAnsweringStep(true);
-
     try {
       const res = await fetch('/api/ai/ask-step', {
         method: 'POST',
@@ -494,132 +461,466 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
           stepTitle: step.title,
           stepExplanation: step.explanation,
           problemSummary: solution.problemSummary,
+          studentName: currentUser.name,
         }),
       });
-
       const data = await res.json();
       if (data.success && data.answer) {
-        setStepAnswers((prev) => ({
-          ...prev,
-          [stepIndex]: data.answer,
-        }));
+        setStepAnswers((prev) => ({ ...prev, [stepIdx]: data.answer }));
         setStepQuestionText('');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.warn('Error asking step', e);
     } finally {
       setIsAnsweringStep(false);
     }
   };
 
+  // Text-to-Speech Engine
+  const speakText = (text: string, id: string, languageOverride?: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      alert('Trình duyệt của bạn chưa hỗ trợ tính năng đọc âm thanh!');
+      return;
+    }
+
+    if (speakingId === id) {
+      window.speechSynthesis.cancel();
+      setSpeakingId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const isEnglish = languageOverride === 'en-US' || solution?.subject === 'Tiếng Anh';
+    const spokenText = isEnglish ? text : sanitizeMathForVietnameseSpeech(text);
+
+    const utterance = new SpeechSynthesisUtterance(spokenText);
+    utterance.rate = speechSpeed;
+    utterance.pitch = 1.05;
+
+    if (isEnglish) {
+      utterance.lang = 'en-US';
+      const enVoice = voices.find((v) => v.lang.includes('en') || v.name.includes('US') || v.name.includes('English'));
+      if (enVoice) utterance.voice = enVoice;
+    } else {
+      utterance.lang = 'vi-VN';
+      const viVoice = voices.find((v) => v.lang.includes('vi') || v.name.includes('Vietnamese') || v.name.includes('Vietnam'));
+      if (viVoice) utterance.voice = viVoice;
+    }
+
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = () => setSpeakingId(null);
+
+    setSpeakingId(id);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Save or remove from Notebook
+  const handleToggleSave = async () => {
+    if (!solution) return;
+
+    const currentRes = typeof solution.finalAnswer === 'string'
+      ? solution.finalAnswer
+      : solution.finalAnswer?.result;
+
+    if (isSavedCurrent) {
+      const target = savedExercises.find(
+        (item) => item.problemSummary === solution.problemSummary && item.finalAnswer?.result === currentRes
+      );
+      if (target) {
+        const updated = savedExercises.filter((item) => item.id !== target.id);
+        setSavedExercises(updated);
+        await deleteExerciseFromCloud(target.id);
+      }
+    } else {
+      const newEntry: AISavedExercise = {
+        ...solution,
+        id: 'sol_' + Date.now(),
+        savedAt: new Date().toLocaleDateString('vi-VN'),
+      };
+      const updated = [newEntry, ...savedExercises];
+      setSavedExercises(updated);
+      await saveExerciseToCloud(newEntry, currentUser);
+    }
+  };
+
+  // Copy solution
+  const handleCopySolution = () => {
+    if (!solution) return;
+    const finalRes = typeof solution.finalAnswer === 'string'
+      ? solution.finalAnswer
+      : solution.finalAnswer?.result;
+    const finalConc = typeof solution.finalAnswer === 'string'
+      ? solution.finalAnswer
+      : solution.finalAnswer?.conclusion;
+
+    const text = `📚 HƯỚNG DẪN BÀI TẬP LỚP 6: ${solution.subject} - ${solution.topic}
+Đề bài: ${solution.problemSummary}
+
+🎯 ĐÁP SỐ CHÍNH XÁC:
+${finalRes}
+
+📝 LỜI KẾT LUẬN:
+${finalConc}
+
+🔍 CÁC BƯỚC GIẢI CHI TIẾT:
+${solution.steps.map((s, i) => `${i + 1}. ${s.title}\n   ${s.explanation}`).join('\n\n')}
+
+💡 LỜI ĐỘNG VIÊN:
+${solution.teacherEncouragement}`;
+
+    navigator.clipboard?.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Add memory point to RAG Profile
+  const handleAddMemoryPoint = async () => {
+    if (!newMemoryNote.trim()) return;
+    const updatedPoints = [...(ragProfile.memoryPoints || []), newMemoryNote.trim()];
+    const updatedProfile: StudentRAGProfile = {
+      ...ragProfile,
+      memoryPoints: updatedPoints,
+    };
+    setRagProfile(updatedProfile);
+    setNewMemoryNote('');
+    setIsSavingProfile(true);
+    await saveStudentRAGProfile(updatedProfile);
+    setIsSavingProfile(false);
+  };
+
+  const handleRemoveMemoryPoint = async (idx: number) => {
+    const updatedPoints = (ragProfile.memoryPoints || []).filter((_, i) => i !== idx);
+    const updatedProfile: StudentRAGProfile = {
+      ...ragProfile,
+      memoryPoints: updatedPoints,
+    };
+    setRagProfile(updatedProfile);
+    await saveStudentRAGProfile(updatedProfile);
+  };
+
+  const handleUpdateLearningStyle = async (style: StudentRAGProfile['preferredLearningStyle']) => {
+    const updatedProfile: StudentRAGProfile = {
+      ...ragProfile,
+      preferredLearningStyle: style,
+    };
+    setRagProfile(updatedProfile);
+    await saveStudentRAGProfile(updatedProfile);
+  };
+
+  // Normalized final answer values for current solution
+  const currentFinalResult = solution
+    ? typeof solution.finalAnswer === 'string'
+      ? solution.finalAnswer
+      : solution.finalAnswer?.result || solution.finalAnswer?.conclusion || 'Hoàn thành bài tập'
+    : '';
+
+  const currentFinalConclusion = solution
+    ? typeof solution.finalAnswer === 'string'
+      ? solution.finalAnswer
+      : solution.finalAnswer?.conclusion || solution.finalAnswer?.result || 'Con hãy đối chiếu lại từng bước giải trên nhé!'
+    : '';
+
+  const currentVerification = solution && typeof solution.finalAnswer === 'object'
+    ? solution.finalAnswer?.verification
+    : null;
+
   return (
-    <div className="min-h-screen bg-slate-50/60 text-slate-800 pb-16 pt-3 px-3 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-      {/* Top Header Bar: Clean & Focused */}
-      <header className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black shadow-xs shrink-0">
-            <Sparkles className="w-6 h-6 text-amber-300" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
-                Học Cùng AI • Gia Sư Lớp 6A2
-              </h1>
-              <span className="hidden sm:inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold px-2 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Gemini 3.8 Flash
+    <div className="space-y-6">
+      {/* Top Banner & Mode Navigation */}
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 rounded-3xl p-6 sm:p-8 text-white shadow-lg relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-2 max-w-2xl">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                Gia Sư Sư Phạm AI Lớp 6A2
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 border border-emerald-400/40 text-[11px] font-semibold flex items-center gap-1">
+                <Cloud className="w-3 h-3" /> Đã kết nối Cloud Firestore
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Giải thích sư phạm từng bước mạch lạc, rõ ràng cho mọi môn học lớp 6
+
+            <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
+              Học Cùng AI • Cá Nhân Hóa & RAG Sư Phạm
+            </h2>
+
+            <p className="text-blue-100 text-xs sm:text-sm leading-relaxed">
+              Chào <strong>{currentUser.name}</strong>! Cô Tuyết Nhi cùng Trợ lý AI sẵn sàng đồng hành giải bài tập, gợi ý tranh mẫu Mỹ thuật, vẽ bản đồ Địa lý và hướng dẫn từng bước chuẩn SGK mới.
             </p>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
-          <button
-            type="button"
-            onClick={() => setActiveTabSub(activeTabSub === 'saved' ? 'solver' : 'saved')}
-            className={`inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-xl border transition cursor-pointer ${
-              activeTabSub === 'saved'
-                ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
-                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-            }`}
-          >
-            <Library className="w-4 h-4 text-amber-600" />
-            <span>Sổ tay bài đã lưu ({savedExercises.length})</span>
-          </button>
-        </div>
-      </header>
-
-      {/* VIEW: Saved Exercises Notebook */}
-      {activeTabSub === 'saved' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs mb-6">
-          <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-                <Bookmark className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Sổ tay bài tập đã lưu</h2>
-                <p className="text-xs text-slate-500">Các bài tập em đã tìm hiểu cùng AI để ôn thi</p>
-              </div>
-            </div>
+          {/* Sub Tabs: Solver vs Saved Notebook vs RAG Profile */}
+          <div className="flex bg-white/15 backdrop-blur-md p-1 rounded-2xl border border-white/20 shrink-0 self-start md:self-auto">
             <button
               type="button"
               onClick={() => setActiveTabSub('solver')}
-              className="text-xs font-semibold px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer transition"
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTabSub === 'solver'
+                  ? 'bg-white text-blue-900 shadow-md'
+                  : 'text-white hover:bg-white/10'
+              }`}
             >
-              Quay lại học bài
+              <Brain className="w-4 h-4 text-blue-600" />
+              <span>Giải bài mới</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTabSub('rag_profile')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTabSub === 'rag_profile'
+                  ? 'bg-white text-blue-900 shadow-md'
+                  : 'text-white hover:bg-white/10'
+              }`}
+            >
+              <UserCheck className="w-4 h-4 text-indigo-600" />
+              <span>Bộ nhớ RAG ({ragProfile.memoryPoints?.length || 0})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTabSub('saved')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTabSub === 'saved'
+                  ? 'bg-white text-blue-900 shadow-md'
+                  : 'text-white hover:bg-white/10'
+              }`}
+            >
+              <Bookmark className="w-4 h-4 text-amber-500" />
+              <span>Sổ tay ({savedExercises.length})</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================================
+          VIEW 1: RAG PERSONALIZATION & KNOWLEDGE PROFILE
+          ========================================================= */}
+      {activeTabSub === 'rag_profile' && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                <Settings2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Hồ Sơ RAG & Cá Nhân Hóa Gia Sư AI ({currentUser.name})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  AI tự động học theo phong cách tiếp thu và ghi chú học tập riêng của em để giảng bài sát nhất
+                </p>
+              </div>
+            </div>
+
+            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold flex items-center gap-1.5">
+              <Cloud className="w-3.5 h-3.5" /> Đồng bộ Cloud tự động
+            </span>
+          </div>
+
+          {/* 1. Preferred Learning Style */}
+          <div className="space-y-3">
+            <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider block">
+              1. Phong cách tiếp thu yêu thích của {currentUser.name}:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {[
+                {
+                  id: 'Trực quan & Hình ảnh' as const,
+                  icon: '🎨',
+                  title: 'Trực quan & Hình ảnh',
+                  desc: 'Nhiều tranh mẫu, sơ đồ Ven, bản đồ địa lý và bảng màu phối sắc.'
+                },
+                {
+                  id: 'Từng bước sư phạm' as const,
+                  icon: '📝',
+                  title: 'Từng bước sư phạm',
+                  desc: 'Gỡ dần từng lớp bài toán, giải thích công thức và mẹo nhớ SGK.'
+                },
+                {
+                  id: 'Âm thanh & Đọc to' as const,
+                  icon: '🔊',
+                  title: 'Âm thanh & Đọc to',
+                  desc: 'Nghe giọng đọc giáo viên ân cần, phát âm tiếng Anh chuẩn bản xứ.'
+                },
+                {
+                  id: 'Ví dụ thực tế' as const,
+                  icon: '🔬',
+                  title: 'Ví dụ đời sống',
+                  desc: 'Liên hệ thực tế, ví von gần gũi với lứa tuổi 11 - 12 tuổi.'
+                }
+              ].map((style) => (
+                <button
+                  key={style.id}
+                  type="button"
+                  onClick={() => handleUpdateLearningStyle(style.id)}
+                  className={`p-4 rounded-2xl border text-left transition cursor-pointer space-y-1.5 ${
+                    ragProfile.preferredLearningStyle === style.id
+                      ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-200'
+                      : 'border-slate-200 bg-slate-50/50 hover:bg-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xl">{style.icon}</span>
+                    {ragProfile.preferredLearningStyle === style.id && (
+                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px]">
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-slate-900 text-xs">{style.title}</h4>
+                  <p className="text-[11px] text-slate-500 leading-snug">{style.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 2. RAG Knowledge & Memory Notes */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                2. Bộ nhớ ghi chú & Mẹo học tập RAG của em:
+              </label>
+              <span className="text-[11px] text-slate-500">
+                {ragProfile.memoryPoints?.length || 0} ghi chú đã lưu
+              </span>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newMemoryNote}
+                onChange={(e) => setNewMemoryNote(e.target.value)}
+                placeholder="Ví dụ: Em cần cô hướng dẫn kỹ quy tắc xa gần trong vẽ tranh phong cảnh..."
+                className="flex-1 text-xs p-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddMemoryPoint();
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddMemoryPoint}
+                disabled={isSavingProfile || !newMemoryNote.trim()}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Thêm vào bộ nhớ</span>
+              </button>
+            </div>
+
+            {/* List of Memory Points */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-2">
+              {(ragProfile.memoryPoints || []).map((point, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 bg-indigo-50/40 border border-indigo-100 rounded-xl flex items-start justify-between gap-2 text-xs text-indigo-950"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-indigo-200 text-indigo-800 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                      {idx + 1}
+                    </span>
+                    <span className="leading-relaxed">{point}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveMemoryPoint(idx)}
+                    className="text-slate-400 hover:text-rose-600 p-1 rounded transition cursor-pointer"
+                    title="Xóa ghi chú"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              💡 Mỗi khi em hỏi bài, Gia sư AI sẽ tự động đọc các ghi chú trên để cá nhân hóa lời giải cho riêng em.
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTabSub('solver')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition cursor-pointer"
+            >
+              Bắt đầu hỏi bài ➔
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          VIEW 2: SAVED EXERCISES NOTEBOOK
+          ========================================================= */}
+      {activeTabSub === 'saved' && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Bookmark className="w-5 h-5 text-amber-600" />
+              <h3 className="font-extrabold text-base text-slate-900">
+                Sổ Tay Bài Tập Đã Lưu ({savedExercises.length})
+              </h3>
+            </div>
+            <span className="text-xs text-slate-500">Đồng bộ Cloud Firestore</span>
           </div>
 
           {savedExercises.length === 0 ? (
-            <div className="text-center py-10 text-slate-400">
-              <BookOpen className="w-10 h-10 mx-auto mb-2 opacity-40 text-slate-400" />
-              <p className="text-sm font-medium text-slate-600">Chưa có bài tập nào trong sổ tay</p>
-              <p className="text-xs text-slate-400 mt-1">Khi xem lời giải, em bấm nút "Lưu vào sổ tay" nhé!</p>
+            <div className="p-12 text-center text-slate-400 space-y-2">
+              <Bookmark className="w-8 h-8 mx-auto opacity-40" />
+              <p className="text-xs sm:text-sm">Chưa có bài tập nào được lưu vào sổ tay.</p>
+              <p className="text-[11px] text-slate-400">
+                Khi AI giải xong một bài tập, hãy bấm nút <strong>"Lưu sổ tay"</strong> để ôn tập lại bất kỳ lúc nào nhé!
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {savedExercises.map((item, idx) => (
+              {savedExercises.map((item) => (
                 <div
-                  key={idx}
-                  className="border border-slate-200 rounded-xl p-4 bg-slate-50/60 hover:bg-white hover:border-blue-300 hover:shadow-2xs transition flex flex-col justify-between"
+                  key={item.id}
+                  className="p-4 bg-slate-50/70 border border-slate-200/80 rounded-2xl hover:border-blue-300 transition space-y-2.5"
                 >
-                  <div>
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded text-[11px]">
-                        {item.subject}
-                      </span>
-                      <span className="text-slate-400 text-[11px]">{item.savedAt}</span>
-                    </div>
-                    <h3 className="font-semibold text-slate-800 text-sm line-clamp-2 mb-2">
-                      {item.problemSummary}
-                    </h3>
-                    <div className="bg-white rounded-lg p-2.5 text-xs text-slate-700 border border-slate-200/80 mb-2">
-                      <span className="font-bold text-emerald-700 mr-1">Đáp số:</span>
-                      <span className="font-semibold text-slate-900">{item.finalAnswer.result}</span>
-                    </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 text-[10px] font-bold">
+                      {item.subject}
+                    </span>
+                    <span className="text-[11px] text-slate-400">{item.savedAt}</span>
                   </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+
+                  <h4 className="text-xs font-bold text-slate-800 line-clamp-2">
+                    {item.problemSummary}
+                  </h4>
+
+                  <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-950 font-semibold line-clamp-2">
+                    Đáp số: {typeof item.finalAnswer === 'string' ? item.finalAnswer : item.finalAnswer?.result}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
                     <button
                       type="button"
                       onClick={() => {
                         setSolution(item);
                         setActiveTabSub('solver');
                       }}
-                      className="text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 cursor-pointer"
+                      className="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
                     >
-                      <span>Xem lại lời giải</span>
+                      <span>Xem lại chi tiết</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
+
                     <button
                       type="button"
-                      onClick={() => setSavedExercises((prev) => prev.filter((_, i) => i !== idx))}
-                      className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                      onClick={async () => {
+                        const updated = savedExercises.filter((x) => x.id !== item.id);
+                        setSavedExercises(updated);
+                        await deleteExerciseFromCloud(item.id);
+                      }}
+                      className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
+                      title="Xóa bài tập này"
                     >
-                      Xóa
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -629,140 +930,137 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
         </div>
       )}
 
-      {/* ========================================================
-          PROFESSIONAL TWO-COLUMN LAYOUT (DESKTOP)
-          Left: Input & Presets (~38%) | Right: Detailed Solution (~62%)
-          ======================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* =========================================================
+          VIEW 3: MAIN SOLVER WORKSPACE (Input + Detailed Solution)
+          ========================================================= */}
+      <div className={`grid grid-cols-1 lg:grid-cols-12 gap-6 ${activeTabSub !== 'solver' ? 'hidden' : ''}`}>
         {/* ======================================================
-            COLUMN 1: INPUT WORKSPACE & SAMPLES (LG: 5 COLS)
+            COLUMN 1: QUESTION INPUT & SAMPLES (LG: 5 COLS)
             ====================================================== */}
-        <div className="lg:col-span-5 space-y-5">
-          {/* Main Input Card */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs transition-all">
-            <div className="flex items-center justify-between mb-3.5">
-              <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
-                  1
-                </span>
-                <span>Nhập đề bài hoặc tải ảnh chụp</span>
-              </h2>
-
-              {(promptText || selectedImage) && (
-                <button
-                  type="button"
-                  onClick={clearInput}
-                  className="text-xs text-slate-400 hover:text-rose-600 cursor-pointer flex items-center gap-1"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Làm mới</span>
-                </button>
-              )}
-            </div>
-
-            {/* Subject Selector Chips */}
-            <div className="mb-3.5">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                Chọn môn học:
+        <div className="lg:col-span-5 space-y-4">
+          <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-4">
+            {/* Subject Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-extrabold text-slate-800 flex items-center justify-between">
+                <span>Chọn môn học:</span>
+                <span className="text-[11px] font-normal text-blue-600">Chuẩn SGK Lớp 6</span>
               </label>
+
               <div className="flex flex-wrap gap-1.5">
                 {SUBJECTS.map((sub) => (
                   <button
                     key={sub}
                     type="button"
                     onClick={() => setSelectedSubject(sub)}
-                    className={`text-xs px-2.5 py-1 rounded-lg font-medium transition cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                       selectedSubject === sub
-                        ? 'bg-blue-600 text-white font-bold shadow-2xs'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
+                    {sub === 'Mỹ thuật' ? '🎨 ' : sub === 'Toán học' ? '📐 ' : sub === 'Lịch sử & Địa lý' ? '🗺️ ' : ''}
                     {sub}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Textarea Input */}
-            <div className="mb-3">
+            {/* Input Text Area */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-extrabold text-slate-800 flex items-center justify-between">
+                <span>Nhập câu hỏi hoặc đề bài tập:</span>
+                <button
+                  type="button"
+                  onClick={clearInput}
+                  className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  Xóa trắng
+                </button>
+              </label>
+
               <textarea
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
-                placeholder="Gõ đề bài hoặc dán câu hỏi tại đây... (Ví dụ: Cho tập hợp B = {2; 3; 4; 5} xét tính đúng sai, hoặc câu hỏi Địa lý Hoàng Sa - Đà Nẵng...)"
+                placeholder="Nhập đề bài ở đây (Ví dụ: Hướng dẫn vẽ tranh phong cảnh sông núi / Vị trí Hoàng Sa trên bản đồ / Tìm x biết 3*(x-2)+2^3=26...)"
                 rows={4}
-                className="w-full text-sm p-3.5 bg-slate-50/70 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-slate-400 transition resize-none leading-relaxed text-slate-800"
+                className="w-full text-xs sm:text-sm p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400"
               />
             </div>
 
-            {/* Upload image thumbnail or upload button */}
-            {selectedImage ? (
-              <div className="mb-4 p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 overflow-hidden">
+            {/* Image Upload Box */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Hoặc chụp ảnh đề bài / ảnh vẽ nháp:</span>
+              </label>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
+              {!selectedImage ? (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files?.[0]) processImageFile(e.dataTransfer.files[0]);
+                  }}
+                  className="p-4 border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-2xl text-center cursor-pointer transition bg-slate-50/50 hover:bg-blue-50/20 group"
+                >
+                  <Upload className="w-5 h-5 mx-auto text-slate-400 group-hover:text-blue-600 mb-1" />
+                  <p className="text-xs font-bold text-slate-700">Tải ảnh đề bài lên</p>
+                  <p className="text-[11px] text-slate-400">Hỗ trợ JPG, PNG, WEBP tối đa 15MB</p>
+                </div>
+              ) : (
+                <div className="relative p-2 bg-slate-100 rounded-2xl flex items-center gap-3">
                   <img
                     src={selectedImage}
-                    alt="Đề bài tải lên"
-                    className="w-12 h-12 object-cover rounded-lg border border-blue-200 shrink-0"
+                    alt="Preview"
+                    className="w-14 h-14 object-cover rounded-xl border border-slate-200"
                   />
-                  <div className="truncate text-xs">
-                    <p className="font-semibold text-blue-950 truncate">{imageName || 'Ảnh chụp bài tập'}</p>
-                    <p className="text-[11px] text-blue-600">Đã đính kèm ảnh vào đề bài</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-800 truncate">{imageName || 'Ảnh đề bài'}</p>
+                    <p className="text-[11px] text-emerald-600 font-semibold">✓ Đã sẵn sàng gửi AI</p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedImage(null);
+                      setImageName('');
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedImage(null);
-                    setImageName('');
-                    if (fileInputRef.current) fileInputRef.current.value = '';
-                  }}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-white rounded-lg transition cursor-pointer"
-                  title="Xóa ảnh này"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="mb-4">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  id="ai-image-upload-input"
-                />
-                <label
-                  htmlFor="ai-image-upload-input"
-                  className="flex items-center justify-center gap-2 p-2.5 border border-dashed border-slate-300 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/30 rounded-xl text-xs font-semibold text-slate-600 hover:text-blue-700 cursor-pointer transition"
-                >
-                  <Upload className="w-4 h-4 text-blue-500" />
-                  <span>Tải ảnh chụp đề bài từ SGK / Vở bài tập</span>
-                </label>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Error banner */}
             {errorMessage && (
-              <div className="mb-3.5 p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl font-medium">
-                {errorMessage}
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-medium flex items-center gap-2">
+                <HelpCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{errorMessage}</span>
               </div>
             )}
 
-            {/* Solve Action Button */}
+            {/* Submit Button */}
             <button
               type="button"
-              onClick={() => handleSolveExercise()}
-              disabled={isLoading || (!promptText.trim() && !selectedImage)}
-              className={`w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-xs ${
-                isLoading || (!promptText.trim() && !selectedImage)
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20 active:scale-[0.99]'
-              }`}
+              onClick={handleSolveExercise}
+              disabled={isLoading}
+              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-extrabold rounded-2xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition cursor-pointer"
             >
               {isLoading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>{loadingStage || 'AI đang phân tích...'}</span>
+                  <Sparkles className="w-4 h-4 animate-spin text-amber-300" />
+                  <span>Cô giáo AI đang chuẩn bị bài giảng...</span>
                 </>
               ) : (
                 <>
@@ -773,14 +1071,14 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
             </button>
           </div>
 
-          {/* Sample Exercises Card */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Đề bài mẫu chuẩn SGK Lớp 6</span>
-              </h3>
-              <span className="text-[11px] text-slate-400">Bấm để thử nhanh</span>
+          {/* Quick 1-Click Curriculum Samples */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                <Library className="w-3.5 h-3.5 text-blue-600" />
+                Đề bài mẫu kiểm tra 1-chạm (Lớp 6):
+              </span>
+              <span className="text-[10px] text-slate-400">Bấm để nạp ngay</span>
             </div>
 
             <div className="space-y-2">
@@ -789,17 +1087,19 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                   key={idx}
                   type="button"
                   onClick={() => loadSample(sample)}
-                  className="w-full text-left p-2.5 rounded-xl border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40 transition group cursor-pointer"
+                  className="w-full p-2.5 rounded-xl border border-slate-100 bg-slate-50/60 hover:bg-blue-50/50 hover:border-blue-200 text-left transition cursor-pointer flex items-center justify-between gap-2 group"
                 >
-                  <div className="flex items-center justify-between text-[11px] mb-1">
-                    <span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
-                      {sample.subject}
-                    </span>
-                    <span className="text-slate-400 group-hover:text-blue-600 transition">Thử ngay ➔</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold text-[9px]">
+                        {sample.subject}
+                      </span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-blue-900 truncate">
+                        {sample.title}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-xs font-semibold text-slate-800 group-hover:text-blue-950 transition line-clamp-1">
-                    {sample.title}
-                  </p>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 shrink-0" />
                 </button>
               ))}
             </div>
@@ -812,41 +1112,43 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
         <div className="lg:col-span-7">
           {/* Empty State: Guide for students */}
           {!solution && !isLoading && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-xs">
-              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 mx-auto flex items-center justify-center mb-3.5">
+            <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center shadow-xs space-y-4">
+              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 mx-auto flex items-center justify-center">
                 <Brain className="w-7 h-7" />
               </div>
-              <h3 className="text-base font-bold text-slate-800 mb-1">
-                Không gian học tập và lời giải chi tiết
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto mb-6 leading-relaxed">
-                Em hãy nhập đề bài hoặc bấm chọn một đề bài mẫu ở cột bên trái, 
-                sau đó nhấn <strong>"Hỏi AI Giải Bài Chi Tiết"</strong> để nhận lời giải sư phạm từng bước nhé!
-              </p>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-800">
+                  Không gian học tập và lời giải chi tiết
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
+                  Em hãy nhập đề bài hoặc bấm chọn một đề bài mẫu ở cột bên trái, 
+                  sau đó nhấn <strong>"Hỏi AI Giải Bài Chi Tiết"</strong> để nhận lời giải sư phạm từng bước nhé!
+                </p>
+              </div>
 
               {/* 3 Step Guidance */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left max-w-lg mx-auto text-xs">
-                <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left max-w-lg mx-auto text-xs pt-2">
+                <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[10px] mb-2">
                     1
                   </span>
                   <p className="font-bold text-slate-800 mb-0.5">Tóm tắt & Giả thiết</p>
                   <p className="text-slate-500 text-[11px]">Xác định rõ dữ kiện đề bài cho và yêu cầu cần tìm.</p>
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">
+                <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-[10px] mb-2">
                     2
                   </span>
-                  <p className="font-bold text-slate-800 mb-0.5">Hướng dẫn từng bước</p>
-                  <p className="text-slate-500 text-[11px]">Giải thích lập luận, công thức và nghe đọc audio.</p>
+                  <p className="font-bold text-slate-800 mb-0.5">Tranh mẫu & Sơ đồ</p>
+                  <p className="text-slate-500 text-[11px]">Minh họa trực quan, bố cục 3 lớp và màu sắc.</p>
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">
+                <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[10px] mb-2">
                     3
                   </span>
-                  <p className="font-bold text-slate-800 mb-0.5">Đáp số chuẩn xác</p>
+                  <p className="font-bold text-slate-800 mb-0.5">Đáp số & Lời kết</p>
                   <p className="text-slate-500 text-[11px]">Kết luận rõ ràng và mẹo thử lại để đạt điểm 10.</p>
                 </div>
               </div>
@@ -855,17 +1157,19 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
 
           {/* Loading Animation Card */}
           {isLoading && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center shadow-xs">
-              <div className="inline-block p-4 rounded-full bg-blue-50 text-blue-600 mb-3 animate-pulse">
+            <div className="bg-white rounded-3xl border border-slate-200 p-10 text-center shadow-xs space-y-4">
+              <div className="inline-block p-4 rounded-full bg-blue-50 text-blue-600 animate-pulse">
                 <Sparkles className="w-8 h-8" />
               </div>
-              <h3 className="text-base font-bold text-slate-800 mb-1">
-                Trợ lý AI đang giải bài tập cho em...
-              </h3>
-              <p className="text-xs text-blue-600 font-semibold mb-4">
-                {loadingStage}
-              </p>
-              <div className="w-44 h-1.5 bg-slate-100 rounded-full mx-auto overflow-hidden">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">
+                  Gia sư AI đang chuẩn bị bài giảng cho {currentUser.name}...
+                </h3>
+                <p className="text-xs text-blue-600 font-semibold mt-1">
+                  {loadingStage}
+                </p>
+              </div>
+              <div className="w-48 h-1.5 bg-slate-100 rounded-full mx-auto overflow-hidden">
                 <div className="w-full h-full bg-blue-600 rounded-full animate-pulse" />
               </div>
             </div>
@@ -874,7 +1178,7 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
           {/* Solution Ready */}
           {solution && !isLoading && (
             <div className="space-y-4">
-              {/* Actions & Subject Header */}
+              {/* Header Bar */}
               <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <span className="bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg">
@@ -890,7 +1194,7 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                       : 'bg-emerald-50 text-emerald-900 border-emerald-200'
                   }`}>
                     <Volume2 className="w-3.5 h-3.5" />
-                    <span>{solution.subject === 'Tiếng Anh' ? '🇬🇧 Giọng đọc: English (US)' : '🇻🇳 Giọng đọc: Tiếng Việt chuẩn SGK'}</span>
+                    <span>{solution.subject === 'Tiếng Anh' ? '🇬🇧 Voice: English (US)' : '🇻🇳 Giọng đọc: Chuẩn SGK mới'}</span>
                   </span>
                 </div>
 
@@ -915,22 +1219,22 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                     }`}
                   >
                     {isSavedCurrent ? <BookmarkCheck className="w-3.5 h-3.5 text-amber-700" /> : <Bookmark className="w-3.5 h-3.5" />}
-                    <span>{isSavedCurrent ? 'Đã lưu' : 'Lưu sổ tay'}</span>
+                    <span>{isSavedCurrent ? 'Đã lưu sổ tay' : 'Lưu sổ tay'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* 1. HERO ANSWER CARD (Clean & Legible Pastel Emerald) */}
+              {/* 1. HERO ANSWER CARD (Guaranteed formatted results & conclusions) */}
               <div className="bg-emerald-50/90 border border-emerald-300/80 rounded-2xl p-5 sm:p-6 shadow-xs">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800 bg-emerald-100/80 px-2.5 py-0.5 rounded-md">
-                    Đáp số chính xác (Final Answer)
+                    Đáp số & Kết luận cốt lõi (Final Answer)
                   </span>
                   <button
                     type="button"
                     onClick={() =>
                       speakText(
-                        `Đáp số: ${solution.finalAnswer.result}. Lời kết luận: ${solution.finalAnswer.conclusion}`,
+                        `Đáp số: ${currentFinalResult}. Lời kết luận: ${currentFinalConclusion}`,
                         'final_ans'
                       )
                     }
@@ -945,19 +1249,21 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                   </button>
                 </div>
 
-                {/* The Answer Result: Pure Vietnamese text or KaTeX Math without font mangling */}
-                <div className="text-xl sm:text-2xl font-black text-emerald-950 my-2 leading-relaxed tracking-normal">
-                  <MathView expression={solution.finalAnswer.result} displayMode={false} />
+                {/* The Answer Result */}
+                <div className="text-lg sm:text-xl font-black text-emerald-950 my-2 leading-relaxed tracking-normal">
+                  <FormattedTextWithMath text={currentFinalResult} />
                 </div>
 
                 {/* Conclusion */}
-                <div className="text-xs sm:text-sm text-emerald-900 leading-relaxed font-medium bg-white/70 p-3 rounded-xl border border-emerald-200/80 mt-2">
-                  <strong className="text-emerald-950 font-bold">Lời kết luận: </strong>
-                  <FormattedTextWithMath text={solution.finalAnswer.conclusion} />
-                </div>
+                {currentFinalConclusion && (
+                  <div className="text-xs sm:text-sm text-emerald-900 leading-relaxed font-medium bg-white/80 p-3 rounded-xl border border-emerald-200/80 mt-2">
+                    <strong className="text-emerald-950 font-bold">Lời kết luận: </strong>
+                    <FormattedTextWithMath text={currentFinalConclusion} />
+                  </div>
+                )}
               </div>
 
-              {/* 2. SUBJECT-SPECIFIC ILLUSTRATION / VISUAL LEARNING AID */}
+              {/* 2. SUBJECT-SPECIFIC ILLUSTRATION / ARTWORK STUDIO / MAP / VENN */}
               <SubjectIllustration
                 subject={solution.subject}
                 topic={solution.topic}
@@ -966,7 +1272,7 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                 onSpeakEnglish={(phrase) => speakText(phrase, 'en_phrase', 'en-US')}
               />
 
-              {/* 2. GIVEN DATA & KEY CONCEPTS (Clean Two-Column Grid) */}
+              {/* 3. GIVEN DATA & KEY CONCEPTS */}
               <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs space-y-3">
                 <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
                   <FileText className="w-4 h-4 text-blue-600" />
@@ -1011,7 +1317,7 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                 </div>
               </div>
 
-              {/* 3. STEP-BY-STEP PEDAGOGICAL BREAKDOWN */}
+              {/* 4. STEP-BY-STEP PEDAGOGICAL BREAKDOWN */}
               <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                   <div className="flex items-center gap-2">
@@ -1051,7 +1357,6 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                 <div className="space-y-3.5">
                   {solution.steps.map((step, idx) => {
                     const isEnglishStep = solution.subject === 'Tiếng Anh';
-
                     const hasFormula = Boolean(step.mathExpression && step.mathExpression.trim() !== '');
 
                     return (
@@ -1104,7 +1409,7 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                           <FormattedTextWithMath text={step.explanation} />
                         </div>
 
-                        {/* ONLY display formula box when mathExpression exists and is non-empty */}
+                        {/* Math Formula Box if available */}
                         {hasFormula && (
                           <div className="mt-2.5 ml-8 p-3 bg-white border border-indigo-100 rounded-xl text-xs shadow-2xs">
                             <span className="text-[10px] uppercase font-bold text-indigo-800 tracking-wider block mb-1.5">
@@ -1181,16 +1486,16 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                 </div>
               </div>
 
-              {/* 4. VERIFICATION & TEACHER ENCOURAGEMENT */}
+              {/* 5. VERIFICATION & TEACHER ENCOURAGEMENT */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {solution.finalAnswer.verification && (
+                {currentVerification && (
                   <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs">
                     <div className="flex items-center gap-1.5 font-bold text-slate-800 text-xs mb-1.5">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                       <span>Cách kiểm tra & thử lại đáp số:</span>
                     </div>
                     <div className="text-xs text-slate-600 leading-relaxed">
-                      <FormattedTextWithMath text={solution.finalAnswer.verification} />
+                      <FormattedTextWithMath text={currentVerification} />
                     </div>
                   </div>
                 )}
@@ -1201,39 +1506,10 @@ export const StudyWithAIView: React.FC<StudyWithAIViewProps> = ({ currentUser })
                     <span>Lời động viên từ Thầy/Cô Lớp 6A2:</span>
                   </div>
                   <p className="text-xs text-amber-950 leading-relaxed italic">
-                    "{solution.teacherEncouragement || 'Em làm bài rất tốt! Hãy ghi nhớ phương pháp này nhé.'}"
+                    "{solution.teacherEncouragement || `Thầy/Cô luôn tự hào về sự chăm chỉ của ${currentUser.name}!`}"
                   </p>
                 </div>
               </div>
-
-              {/* 5. PRACTICE SIMILAR EXERCISE */}
-              {solution.finalAnswer.similarExercise && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-800 text-xs sm:text-sm">
-                      <BookOpen className="w-4 h-4 text-indigo-600" />
-                      <span>Bài tập tương tự để em tự luyện tập:</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowSimilarAnswer(!showSimilarAnswer)}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-                    >
-                      {showSimilarAnswer ? 'Ẩn gợi ý' : 'Hiện gợi ý'}
-                    </button>
-                  </div>
-
-                  <div className="text-xs text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100 font-medium leading-relaxed">
-                    <FormattedTextWithMath text={solution.finalAnswer.similarExercise} />
-                  </div>
-
-                  {showSimilarAnswer && (
-                    <div className="mt-2 text-xs bg-indigo-50/70 border border-indigo-100 text-indigo-900 p-2.5 rounded-lg">
-                      💡 <em>Gợi ý: Em áp dụng đúng các bước vừa học ở trên để tự giải vào vở nhé!</em>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
         </div>

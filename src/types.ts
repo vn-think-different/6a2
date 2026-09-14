@@ -29,6 +29,7 @@ export interface Student {
   ambassadorRole?: string;
   avatar: string;
   interests?: string;
+  personality?: string;
   motto?: string;
 }
 

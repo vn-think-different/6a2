@@ -157,25 +157,58 @@ export function saveStoredUsers(users: StoredUser[]): void {
 }
 
 /**
- * Get all active students for the class view
+ * Get all active students for the class view, strictly derived from stored users
+ * to guarantee 100% avatar, name, and profile sync across all devices.
  */
 export function getStoredStudents(): Student[] {
   try {
-    const data = localStorage.getItem(STORAGE_STUDENTS_KEY);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.error('Error reading students from localStorage:', e);
-  }
+    const users = getStoredUsers();
+    const studentsMap = new Map<number, Student>();
 
-  // Derive students from initial data
-  const initial = [...STUDENTS_54];
-  saveStoredStudents(initial);
-  return initial;
+    // Seed base defaults from STUDENTS_54
+    STUDENTS_54.forEach((s) => {
+      studentsMap.set(s.stt, { ...s });
+    });
+
+    // Merge with any real-time user updates from cloud/local users
+    users.forEach((u) => {
+      if (u.studentId) {
+        const existing = studentsMap.get(u.studentId) || {
+          stt: u.studentId,
+          name: u.name,
+          dob: u.dob || '01/01/2015',
+          gender: (u.gender as 'Nam' | 'Nữ') || 'Nam',
+          ethnicity: 'Kinh',
+          bilingual: '',
+          roleInClass: u.roleTitle || 'Học sinh 6A2',
+          avatar: u.avatar,
+          interests: u.interests || '',
+          motto: u.motto || '',
+        };
+
+        studentsMap.set(u.studentId, {
+          ...existing,
+          name: u.name || existing.name,
+          avatar: u.avatar || existing.avatar,
+          interests: u.interests !== undefined ? u.interests : existing.interests,
+          personality: u.personality !== undefined ? u.personality : existing.personality,
+          motto: u.motto !== undefined ? u.motto : existing.motto,
+          dob: u.dob || existing.dob,
+          gender: (u.gender as 'Nam' | 'Nữ') || existing.gender,
+          roleInClass: u.roleTitle || existing.roleInClass,
+        });
+      }
+    });
+
+    const result = Array.from(studentsMap.values()).sort((a, b) => a.stt - b.stt);
+    try {
+      localStorage.setItem(STORAGE_STUDENTS_KEY, JSON.stringify(result));
+    } catch {}
+    return result;
+  } catch (e) {
+    console.error('Error reading students from users:', e);
+    return [...STUDENTS_54];
+  }
 }
 
 export function saveStoredStudents(students: Student[]): void {

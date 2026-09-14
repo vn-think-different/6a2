@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   User,
@@ -13,6 +13,9 @@ import {
   Save,
   KeyRound,
   Shield,
+  CloudCheck,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import {
@@ -20,7 +23,8 @@ import {
   changeUserPassword,
   getStoredUsers,
 } from '../db/authDatabase';
-import { useImageModal } from '../context/ImageContext';
+import { saveUserToCloud } from '../db/firestoreService';
+import { useImageModal, PRESET_LIBRARY } from '../context/ImageContext';
 
 interface ProfileEditModalProps {
   currentUser: UserAccount;
@@ -46,6 +50,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
   const [motto, setMotto] = useState(currentUser.motto || '');
   const [dob, setDob] = useState(currentUser.dob || '');
   const [gender, setGender] = useState<'Nam' | 'Nữ'>(currentUser.gender || 'Nam');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Password State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -54,24 +59,57 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
+  // Sync state whenever modal opens or currentUser changes
+  useEffect(() => {
+    if (isOpen) {
+      setName(currentUser.name);
+      setAvatar(currentUser.avatar);
+      setInterests(currentUser.interests || '');
+      setPersonality(currentUser.personality || '');
+      setMotto(currentUser.motto || '');
+      setDob(currentUser.dob || '');
+      setGender(currentUser.gender || 'Nam');
+      setPasswordError(null);
+      setPasswordSuccess(null);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    }
+  }, [isOpen, currentUser]);
+
   if (!isOpen) return null;
 
-  const handleSaveInfo = (e: React.FormEvent) => {
-    e.preventDefault();
-    const updated = updateUserProfile(currentUser.id, {
-      name: name.trim(),
-      avatar,
-      interests: interests.trim(),
-      personality: personality.trim(),
-      motto: motto.trim(),
-      dob: dob.trim(),
-      gender,
-    });
+  // Quick avatar suggestions from library
+  const avatarPresets = PRESET_LIBRARY[0]?.images || [];
 
-    if (updated) {
-      const { password, ...safeUser } = updated;
-      onProfileUpdated(safeUser);
-      showToast('Đã lưu cập nhật thông tin cá nhân thành công!');
+  const handleSaveInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+
+    try {
+      const updated = updateUserProfile(currentUser.id, {
+        name: name.trim(),
+        avatar,
+        interests: interests.trim(),
+        personality: personality.trim(),
+        motto: motto.trim(),
+        dob: dob.trim(),
+        gender,
+      });
+
+      if (updated) {
+        // Also ensure direct Cloud Firestore write completes
+        await saveUserToCloud(updated);
+        const { password, ...safeUser } = updated;
+        onProfileUpdated(safeUser);
+        showToast('Đã lưu và đồng bộ thông tin cá nhân lên Cloud thành công!');
+        setIsSaving(false);
+        onClose();
+      }
+    } catch (err) {
+      console.warn('Profile save error:', err);
+      setIsSaving(false);
+      showToast('Đã lưu thông tin vào bộ nhớ tạm');
       onClose();
     }
   };
@@ -100,7 +138,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      showToast('Đã đổi mật khẩu thành công! Hãy ghi nhớ mật khẩu mới nhé.');
+      showToast('Đã đổi mật khẩu và đồng bộ lên Cloud thành công!');
       setTimeout(() => {
         onClose();
       }, 1200);
@@ -180,10 +218,9 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                     type="button"
                     onClick={() =>
                       openImageModal({
-                        currentUrl: avatar,
+                        src: avatar,
                         title: `Thay đổi ảnh đại diện: ${name}`,
                         subtitle: 'Tải ảnh mới từ máy hoặc dán liên kết URL',
-                        canEdit: true,
                         onSave: (newUrl) => setAvatar(newUrl),
                       })
                     }
@@ -193,22 +230,59 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                     <span className="text-[10px] font-bold">Đổi ảnh</span>
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    openImageModal({
-                      currentUrl: avatar,
-                      title: `Thay đổi ảnh đại diện: ${name}`,
-                      subtitle: 'Tải ảnh mới từ máy hoặc dán liên kết URL',
-                      canEdit: true,
-                      onSave: (newUrl) => setAvatar(newUrl),
-                    })
-                  }
-                  className="mt-2 text-xs font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 cursor-pointer"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Chọn / Đổi ảnh đại diện</span>
-                </button>
+
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openImageModal({
+                        src: avatar,
+                        title: `Thay đổi ảnh đại diện: ${name}`,
+                        subtitle: 'Tải ảnh mới từ máy hoặc dán liên kết URL',
+                        onSave: (newUrl) => setAvatar(newUrl),
+                      })
+                    }
+                    className="text-xs font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 cursor-pointer bg-rose-50 hover:bg-rose-100 px-3 py-1 rounded-lg border border-rose-200 transition"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Tải ảnh từ máy / Đổi link ảnh</span>
+                  </button>
+                </div>
+
+                {/* Quick Avatar Presets */}
+                <div className="mt-3 w-full border-t border-slate-200 pt-3">
+                  <p className="text-[11px] font-bold text-slate-500 mb-2 text-center">
+                    Hoặc chọn nhanh ảnh mẫu có sẵn:
+                  </p>
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
+                    {avatarPresets.slice(0, 7).map((img, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setAvatar(img.url)}
+                        className={`relative w-9 h-9 rounded-full overflow-hidden border-2 transition cursor-pointer transform hover:scale-110 ${
+                          avatar === img.url
+                            ? 'border-rose-600 ring-2 ring-rose-300 scale-105'
+                            : 'border-slate-200 hover:border-rose-400'
+                        }`}
+                        title={img.label}
+                      >
+                        <img src={img.url} alt={img.label} className="w-full h-full object-cover" />
+                        {avatar === img.url && (
+                          <div className="absolute inset-0 bg-rose-600/30 flex items-center justify-center">
+                            <CheckCircle2 className="w-4 h-4 text-white drop-shadow" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Real-time Cloud Notice */}
+                <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                  <CloudCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Ảnh & thông tin sẽ tự động đồng bộ thời gian thực lên Cloud</span>
+                </div>
               </div>
 
               {/* Name */}
@@ -319,10 +393,15 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Lưu Thay Đổi</span>
+                  {isSaving ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isSaving ? 'Đang lưu lên Cloud...' : 'Lưu Thay Đổi'}</span>
                 </button>
               </div>
             </form>

@@ -64,6 +64,7 @@ import {
   saveStoredUsers,
   getStoredPosts,
   saveStoredPosts,
+  updateUserProfile,
 } from './db/authDatabase';
 import {
   getStoredStudyDocuments,
@@ -183,11 +184,12 @@ export default function App() {
   };
 
   const handleUpdateStudentAvatar = (stt: number, newAvatar: string) => {
-    setStudents((prev) =>
-      prev.map((s) => (s.stt === stt ? { ...s, avatar: newAvatar } : s))
-    );
-    if (currentUser?.studentId === stt) {
-      setCurrentUser((prev) => prev ? { ...prev, avatar: newAvatar } : null);
+    const updated = updateUserProfile(`student-${stt}`, { avatar: newAvatar });
+    setStudents(getStoredStudents());
+    if (currentUser?.studentId === stt && updated) {
+      const { password, ...safeUser } = updated;
+      setCurrentUser(safeUser);
+      saveCurrentSession(safeUser);
     }
   };
 
